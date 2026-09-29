@@ -1,0 +1,23 @@
+# Secrets — copy backend/.env.example to backend/.env and fill it in
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output
+node_modules/
+backend/.venv/
+__pycache__/
+*.pyc
+frontend/.next/
+frontend/out/
+frontend/tsconfig.tsbuildinfo
+
+# Old frontend sync backups (the pre-correction src and its tarballs).
+# Kept on disk until deleted; not part of the project's history.
+frontend/src-before-correction/
+frontend/*.tar.gz
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log

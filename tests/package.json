@@ -1,0 +1,11 @@
+{
+  "name": "inventoryai-tests",
+  "private": true,
+  "description": "End-to-end tests against a running InventoryAI (backend :8000, frontend :3000).",
+  "scripts": {
+    "browsers": "playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "^1.59.0"
+  }
+}
