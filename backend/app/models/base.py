@@ -244,6 +244,21 @@ class AuditMixin:
     )
 
 
+class TimestampMixin:
+    """`created_at`/`updated_at` without the `created_by`/`updated_by` pair,
+    for business tables whose author is already recorded elsewhere (the
+    audit trail, or a document's own `received_by`/`approved_by`).
+    `updated_at` is bumped by the `set_updated_at` trigger (migration
+    a8c4e1f7d2b6), so it is correct even for a raw SQL `UPDATE`."""
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class SoftDeleteMixin:
     """`deleted_at` — master-data tables only (§10). Transactional documents
     are cancelled, never deleted, and do not use this mixin."""

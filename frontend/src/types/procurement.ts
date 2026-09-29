@@ -41,6 +41,7 @@ export interface Rfq {
   estimatedValue: Money;
   createdFrom: "manual" | "low_stock" | "imported";
   createdAt: Timestamp;
+  updatedAt?: Timestamp;
   rowVersion: number;
   /** Set only when createdFrom === "imported" (BR-RFQ-09). */
   externalSourceName?: string | null;
@@ -121,6 +122,7 @@ export interface SupplierQuotation {
   approvedAt?: Timestamp | null;
   rejectedReason?: string;
   createdAt: Timestamp;
+  updatedAt?: Timestamp;
   rowVersion: number;
 }
 
@@ -299,12 +301,14 @@ export interface PurchaseOrder {
   sentAt?: Timestamp | null;
   cancelledAt?: Timestamp | null;
   cancelledBy?: Id | null;
+  cancelledByName?: string;
   cancellationReason?: string;
   /** Derived from line receipts — never set by hand (BR-PO-05). */
   receivedPct: Percent;
   fullyReceivedAt?: Timestamp | null;
   notes?: string;
   createdAt: Timestamp;
+  updatedAt: Timestamp;
   rowVersion: number;
 }
 
@@ -466,14 +470,12 @@ export interface GoodsReceipt {
   confirmedBy?: Id | null;
   confirmedAt?: Timestamp | null;
   cancelledAt?: Timestamp | null;
+  cancelledByName?: string;
   cancellationReason?: string;
-  /** Set on the original when a reversing GRN is raised (C6). */
-  reversedByGrnId?: Id | null;
-  /** Set on the reversing GRN, pointing back at what it reverses. */
-  reversalOfGrnId?: Id | null;
   hasDiscrepancy: boolean;
   remarks: string;
   createdAt: Timestamp;
+  updatedAt: Timestamp;
   rowVersion: number;
 }
 

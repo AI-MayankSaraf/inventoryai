@@ -17,7 +17,6 @@ agreed" still true tomorrow.
 
 from __future__ import annotations
 
-from datetime import date
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID, uuid4
@@ -26,6 +25,7 @@ from fastapi import Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core import audit
 from app.core.db import set_tenant
 from app.core.errors import (
@@ -395,7 +395,7 @@ async def create_proforma(
     ).scalar_one_or_none() or "nearest"
 
     proforma_id = uuid4()
-    proforma_date = body.proforma_date or date.today()
+    proforma_date = body.proforma_date or clock.today()
 
     # Header first with placeholder totals: the item rows carry a NOT NULL
     # FK back to it, so they cannot be inserted before it exists. Same

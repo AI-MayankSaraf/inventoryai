@@ -219,6 +219,11 @@ class AuditLog(Base):
                 "purchase_return",
                 "stock_transfer",
                 "role",
+                "quotation_comparison",
+                "supplier_portal_access",
+                # Added in migration c7e2a9f4b1d3.
+                "company_list",
+                "subscription_plan",
             ],
         ),
         enum_check(

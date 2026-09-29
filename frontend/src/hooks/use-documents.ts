@@ -113,6 +113,10 @@ export function useConfirmSchemaMapping(onSuccess?: () => void) {
   return useApiMutation(documentsApi.confirmSchemaMapping, { onSuccess });
 }
 
+export function useAssistantSuggestions() {
+  return useApiQuery(["assistant-suggestions"], () => documentsApi.getAssistantSuggestions());
+}
+
 export function useAssistant() {
   return useApiMutation(documentsApi.askAssistant);
 }

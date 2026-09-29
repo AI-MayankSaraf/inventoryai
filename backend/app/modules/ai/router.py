@@ -577,6 +577,14 @@ async def rebuild_embeddings(
 # ============================================================== assistant
 
 
+@router.get("/assistant/suggestions", response_model=list[schemas.AssistantSuggestionOut])
+async def assistant_suggestions(
+    claims: AccessTokenClaims = Depends(require_permission("ai.assistant")),
+) -> list[dict]:
+    """Example questions, one per question type the assistant can answer."""
+    return assistant_service.suggestions()
+
+
 @router.post("/assistant", response_model=schemas.AssistantAnswerOut)
 async def ask_assistant(
     body: schemas.AssistantRequest,

@@ -53,6 +53,8 @@ interface ProductOut {
   tracking_type: string;
   base_uom_id: string;
   is_active: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 /** `/catalog/variants` — this is the SKU. */
@@ -74,6 +76,8 @@ interface VariantOut {
   lead_time_days: number | null;
   attributes: Record<string, string>;
   is_active: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 interface CategoryOut {
@@ -112,14 +116,14 @@ interface GodownOut {
   is_default: boolean;
   is_active: boolean;
   incharge_user_id?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 /* -------------------------------------------------- snake_case -> camelCase */
 
-// The backend doesn't carry `createdAt`/`updatedAt`/`deletedAt` on these
-// master-data reads yet, so they're defaulted below. Nothing in the current
-// UI reads those fields for products/variants/categories/brands/godowns, so
-// this is a safe simplification rather than a functional gap.
+// Soft-deleted rows never reach these reads, so `deletedAt` is always null
+// here. Categories and brands carry no timestamps.
 
 function toProduct(p: ProductOut): Product {
   return {
@@ -136,8 +140,8 @@ function toProduct(p: ProductOut): Product {
     baseUomId: p.base_uom_id,
     isActive: p.is_active,
     deletedAt: null,
-    createdAt: "",
-    updatedAt: "",
+    createdAt: p.created_at,
+    updatedAt: p.updated_at,
   };
 }
 
@@ -165,8 +169,8 @@ function toVariant(v: VariantOut): ProductVariant {
     attributes: v.attributes ?? {},
     isActive: v.is_active,
     deletedAt: null,
-    createdAt: "",
-    updatedAt: "",
+    createdAt: v.created_at,
+    updatedAt: v.updated_at,
   };
 }
 
@@ -218,8 +222,8 @@ function toGodown(g: GodownOut): Godown {
     isDefault: g.is_default,
     isActive: g.is_active,
     deletedAt: null,
-    createdAt: "",
-    updatedAt: "",
+    createdAt: g.created_at,
+    updatedAt: g.updated_at,
   };
 }
 
@@ -241,7 +245,6 @@ export interface ProductListRow {
   mrp: number;
   reorderPoint: Quantity;
   trackingType: Product["trackingType"];
-  displayEmoji?: string;
   isActive: boolean;
   /** Total across every godown, read from the derived balances (never stored). */
   totalStock: Quantity;
@@ -305,8 +308,6 @@ async function fetchProductListRows(): Promise<ProductListRow[]> {
       mrp: variant.mrp,
       reorderPoint: variant.reorder_point,
       trackingType: (product?.tracking_type ?? "none") as Product["trackingType"],
-      // Not stored by the backend; screens show the default icon.
-      displayEmoji: undefined,
       isActive: variant.is_active && (product?.is_active ?? true),
       totalStock: stockByVariant.get(variant.id) ?? 0,
     };
@@ -469,7 +470,6 @@ export interface ProductInput {
   barcode?: string;
   mpn?: string;
   modelCode?: string;
-  displayEmoji?: string;
   attributes?: Record<string, string>;
   /** Create only. Posts an opening-stock movement into this godown. */
   openingStock?: { godownId: Id; quantity: Quantity } | null;

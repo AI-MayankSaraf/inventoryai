@@ -22,6 +22,9 @@ class CompanyProfileOut(BaseModel):
     plan: str
     status: str
     onboarded_on: date
+    suspended_at: Optional[datetime] = None
+    suspended_reason: Optional[str] = None
+    owner_email: Optional[str] = None
 
 
 class CompanyProfileUpdate(BaseModel):
@@ -270,7 +273,8 @@ class CompanyOnboardRequest(BaseModel):
     city: Optional[str] = Field(default=None, max_length=200)
     email: Optional[str] = Field(default=None, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     phone: Optional[str] = Field(default=None, max_length=20)
-    plan: str = Field(default="Trial", pattern="^(Trial|Starter|Growth|Enterprise)$")
+    #: A `subscription_plans` name; checked against the active plans.
+    plan: str = Field(default="Trial", min_length=1, max_length=100)
     owner_email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     owner_full_name: str = Field(min_length=2, max_length=300)
 
@@ -316,7 +320,7 @@ class CompanyAdminUpdate(BaseModel):
     city: Optional[str] = Field(default=None, max_length=200)
     email: Optional[str] = Field(default=None, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     phone: Optional[str] = Field(default=None, max_length=20)
-    plan: Optional[str] = Field(default=None, pattern="^(Trial|Starter|Growth|Enterprise)$")
+    plan: Optional[str] = Field(default=None, min_length=1, max_length=100)
 
 
 class CompanySuspendRequest(BaseModel):
@@ -429,3 +433,27 @@ class PlatformUserProfileUpdate(BaseModel):
     full_name: Optional[str] = Field(default=None, min_length=2, max_length=300)
     phone: Optional[str] = Field(default=None, max_length=30)
 
+
+
+class SubscriptionPlanOut(BaseModel):
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    sort_order: int
+    is_active: bool
+    company_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class SubscriptionPlanCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    description: Optional[str] = Field(default=None, max_length=500)
+    sort_order: Optional[int] = Field(default=None, ge=0, le=32000)
+
+
+class SubscriptionPlanUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    description: Optional[str] = Field(default=None, max_length=500)
+    sort_order: Optional[int] = Field(default=None, ge=0, le=32000)
+    is_active: Optional[bool] = None

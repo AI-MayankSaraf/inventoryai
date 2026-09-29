@@ -9,7 +9,7 @@ together in one commit or nothing lands at all.
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import datetime, time
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID, uuid4
@@ -18,6 +18,7 @@ from fastapi import Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core import audit
 from app.core.deps import assert_godown_in_scope
 from app.core.errors import (
@@ -44,7 +45,7 @@ from app.core.db import commit_and_rescope, set_tenant
 from app.modules.documents import variance_service
 from app.modules.documents.variance_service import Finding
 from app.modules.procurement import po_service
-from app.modules.procurement.schemas import GrnCreate, GrnReverseRequest, GrnUpdate
+from app.modules.procurement.schemas import GrnCancelRequest, GrnCreate, GrnReverseRequest, GrnUpdate
 
 _WRONG_TYPES = {"wrong_product", "wrong_variant", "wrong_model", "wrong_brand"}
 _MANUAL_TYPES = _WRONG_TYPES | {"damaged", "expired"}
@@ -58,7 +59,9 @@ async def _load(session: AsyncSession, *, company_id: str, grn_id: UUID) -> dict
                 "SELECT id, grn_number, grn_date, supplier_id, purchase_order_id, godown_id, received_by, "
                 "vehicle_number, transporter_name, lr_number, eway_bill_number, gate_entry_number, "
                 "supplier_challan_number, supplier_challan_date, status, confirmed_by, confirmed_at, "
-                "cancelled_at, has_discrepancy, remarks, row_version "
+                "cancelled_at, cancelled_by, cancellation_reason, has_discrepancy, remarks, row_version, "
+                "created_at, updated_at, "
+                "(SELECT u.full_name FROM users u WHERE u.id = goods_receipts.cancelled_by) AS cancelled_by_name "
                 "FROM goods_receipts WHERE id = :id AND company_id = :c"
             ),
             {"id": grn_id, "c": company_id},
@@ -134,7 +137,9 @@ async def list_grns(
                 "SELECT id, grn_number, grn_date, supplier_id, purchase_order_id, godown_id, received_by, "
                 "vehicle_number, transporter_name, lr_number, eway_bill_number, gate_entry_number, "
                 "supplier_challan_number, supplier_challan_date, status, confirmed_by, confirmed_at, "
-                "cancelled_at, has_discrepancy, remarks, row_version "
+                "cancelled_at, cancelled_by, cancellation_reason, has_discrepancy, remarks, row_version, "
+                "created_at, updated_at, "
+                "(SELECT u.full_name FROM users u WHERE u.id = goods_receipts.cancelled_by) AS cancelled_by_name "
                 f"FROM goods_receipts WHERE {' AND '.join(where)} ORDER BY grn_date DESC, grn_number DESC LIMIT :limit OFFSET :offset"
             ),
             params,
@@ -286,7 +291,7 @@ async def _write_items(
         # number on every movement that actually receives quantity.
         if variant["tracking_type"] == "batch" and not item.batch_number and D(item.received_quantity) > 0:
             raise ApiError(status.HTTP_422_UNPROCESSABLE_ENTITY, CODE_BATCH_REQUIRED, f"Line {line_no}: this item is batch-tracked; a batch number is required")
-        if item.expires_on and item.expires_on <= date.today() and issue_type != "expired":
+        if item.expires_on and item.expires_on <= clock.today() and issue_type != "expired":
             raise ApiError(status.HTTP_422_UNPROCESSABLE_ENTITY, CODE_BATCH_EXPIRED, f"Line {line_no}: expiry date must be in the future")
 
         batch_id = await _resolve_batch(session, company_id=claims.company_id, product_variant_id=item.product_variant_id, item=item)
@@ -355,7 +360,7 @@ async def create_grn(
     # BR-GRN-10
     assert_godown_in_scope(claims, body.godown_id, override_permission="grn.receive_other_godown")
 
-    grn_date = body.grn_date or date.today()
+    grn_date = body.grn_date or clock.today()
     await assert_period_open(session, company_id=UUID(claims.company_id), on=grn_date)
 
     po = None
@@ -744,15 +749,19 @@ def _grn_findings(items: list[dict]) -> list[Finding]:
 
 
 async def cancel_grn(
-    session: AsyncSession, *, claims: AccessTokenClaims, grn_id: UUID, request: Optional[Request] = None
+    session: AsyncSession, *, claims: AccessTokenClaims, grn_id: UUID,
+    body: Optional[GrnCancelRequest] = None, request: Optional[Request] = None,
 ) -> dict:
     before = await _load(session, company_id=claims.company_id, grn_id=grn_id)
     if before["status"] != "draft":
         # State diagram: "cancelled (draft only)"
         raise ApiError(status.HTTP_409_CONFLICT, CODE_INVALID_STATE_TRANSITION, f"Only draft GRNs can be cancelled (current status: {before['status']})")
     await session.execute(
-        text("UPDATE goods_receipts SET status = 'cancelled', cancelled_at = now(), row_version = row_version + 1 WHERE id = :id"),
-        {"id": grn_id},
+        text(
+            "UPDATE goods_receipts SET status = 'cancelled', cancelled_at = now(), cancelled_by = :who, "
+            "cancellation_reason = :reason, row_version = row_version + 1 WHERE id = :id"
+        ),
+        {"id": grn_id, "who": claims.user_id, "reason": ((body.reason or "").strip() or None) if body else None},
     )
     after = await _load(session, company_id=claims.company_id, grn_id=grn_id)
     await audit.record(

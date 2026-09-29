@@ -55,6 +55,8 @@ interface SupplierOut {
   bank_account_no: string | null;
   bank_ifsc: string | null;
   notes: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 /** `catalog/detail_schemas.py` shapes. */
@@ -142,8 +144,8 @@ function toSupplier(s: SupplierOut): Supplier {
     status: s.status as Supplier["status"],
     isActive: s.status === "active",
     deletedAt: null,
-    createdAt: "",
-    updatedAt: "",
+    createdAt: s.created_at,
+    updatedAt: s.updated_at,
   };
 }
 

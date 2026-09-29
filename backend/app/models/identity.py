@@ -73,7 +73,13 @@ class Company(UUIDPkMixin, AuditMixin, SoftDeleteMixin, Base):
     email: Mapped[Optional[str]] = mapped_column(Text)
     phone: Mapped[Optional[str]] = mapped_column(Text)
     logo_document_id: Mapped[Optional[uuid.UUID]] = plain_fk("documents.id", ondelete="SET NULL")
-    plan: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'Trial'"))
+    # A row of `subscription_plans`, by name; renaming a plan carries through.
+    plan: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("subscription_plans.name", onupdate="CASCADE", ondelete="RESTRICT"),
+        nullable=False,
+        server_default=text("'Trial'"),
+    )
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
     suspended_at: Mapped[Optional[datetime]] = mapped_column()
     suspended_reason: Mapped[Optional[str]] = mapped_column(Text)
@@ -86,8 +92,49 @@ class Company(UUIDPkMixin, AuditMixin, SoftDeleteMixin, Base):
             unique=True,
             postgresql_where=text("gstin IS NOT NULL AND deleted_at IS NULL"),
         ),
-        enum_check("plan", ["Trial", "Starter", "Growth", "Enterprise"]),
         enum_check("status", ["active", "suspended"]),
+    )
+
+
+class SubscriptionPlan(UUIDPkMixin, Base):
+    """The plans a company can be on, managed from the platform console.
+    Platform-wide: no company_id, no RLS. Companies reference a plan by
+    name (`companies.plan`), so a plan in use cannot be deleted, only
+    deactivated, and renaming one updates every company on it."""
+
+    __tablename__ = "subscription_plans"
+
+    name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    sort_order: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default=text("0"))
+    is_active: Mapped[bool] = mapped_column(nullable=False, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+
+
+#: The pick-lists a company edits for itself (Settings > Lists).
+COMPANY_LIST_KEYS = ("payment_terms", "delivery_terms", "supplier_type")
+
+
+class CompanyList(UUIDPkMixin, TenantMixin, Base):
+    """One value of a company-editable pick-list: payment terms, delivery
+    terms, supplier types. Records copy the chosen text (a PO keeps "30
+    Days" even if the list later drops it), so removing a value never
+    changes history."""
+
+    __tablename__ = "company_lists"
+
+    list_key: Mapped[str] = mapped_column(Text, nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    sort_order: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default=text("0"))
+    is_active: Mapped[bool] = mapped_column(nullable=False, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        uq_company_id("company_lists"),
+        Index("uq_company_lists_value", "company_id", "list_key", text("lower(value)"), unique=True),
+        enum_check("list_key", list(COMPANY_LIST_KEYS)),
     )
 
 

@@ -69,7 +69,6 @@ type FormState = {
   barcode: string;
   mpn: string;
   modelCode: string;
-  displayEmoji: string;
 };
 
 const EMPTY_FORM: FormState = {
@@ -90,7 +89,6 @@ const EMPTY_FORM: FormState = {
   barcode: "",
   mpn: "",
   modelCode: "",
-  displayEmoji: "📦",
 };
 
 function formFromDetail(detail: catalogApi.ProductDetail): FormState {
@@ -112,7 +110,6 @@ function formFromDetail(detail: catalogApi.ProductDetail): FormState {
     barcode: detail.variant.barcode ?? "",
     mpn: detail.variant.mpn ?? "",
     modelCode: detail.variant.modelCode ?? "",
-    displayEmoji: detail.product.displayEmoji ?? "📦",
   };
 }
 
@@ -191,7 +188,6 @@ export function ProductFormDialog({
       barcode: form.barcode.trim() || undefined,
       mpn: form.mpn.trim() || undefined,
       modelCode: form.modelCode.trim() || undefined,
-      displayEmoji: form.displayEmoji.trim() || undefined,
       attributes,
       openingStock:
         !isEdit && openingGodownId && Number(openingQty) > 0

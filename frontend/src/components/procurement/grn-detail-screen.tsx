@@ -52,7 +52,7 @@ import {
   useReverseGoodsReceipt,
 } from "@/hooks/use-receiving";
 import { GRN_ISSUE_LABELS } from "@/lib/api/receiving.api";
-import { formatCurrency, formatDate, formatQuantity } from "@/lib/format";
+import { formatCurrency, formatDate, formatDateTime, formatQuantity } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { GoodsReceiptStatus, Id } from "@/types";
 
@@ -317,6 +317,17 @@ export function GrnDetailScreen({ id }: { id: Id }) {
                     value={grn.supplierChallanDate ? formatDate(grn.supplierChallanDate) : null}
                   />
                   {grn.remarks && <DetailRow label="Remarks" value={grn.remarks} />}
+                  <DetailRow label="Created" value={formatDateTime(grn.createdAt)} />
+                  <DetailRow label="Last Updated" value={formatDateTime(grn.updatedAt)} />
+                  {grn.status === "cancelled" && (
+                    <DetailRow
+                      label="Cancelled"
+                      value={[
+                        grn.cancelledAt ? formatDateTime(grn.cancelledAt) : null,
+                        grn.cancelledByName ? `by ${grn.cancelledByName}` : null,
+                      ].filter(Boolean).join(" ") || "—"}
+                    />
+                  )}
                   {grn.status === "cancelled" && grn.cancellationReason && (
                     <DetailRow label="Cancellation Reason" value={grn.cancellationReason} />
                   )}

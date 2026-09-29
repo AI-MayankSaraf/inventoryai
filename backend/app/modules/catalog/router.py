@@ -32,6 +32,7 @@ PRODUCTS = Resource(
     columns=[
         "id", "name", "brand_id", "category_id", "manufacturer_name", "description",
         "hsn_code", "gst_rate", "cess_rate", "tracking_type", "base_uom_id", "is_active",
+        "created_at", "updated_at",
     ],
     writable=[
         "name", "brand_id", "category_id", "manufacturer_name", "description",
@@ -48,6 +49,7 @@ VARIANTS = Resource(
         "id", "product_id", "sku", "variant_name", "barcode", "hsn_code", "gst_rate",
         "uom_id", "pack_size", "purchase_price", "sale_price", "mrp",
         "reorder_point", "reorder_qty", "lead_time_days", "attributes", "is_active",
+        "created_at", "updated_at",
     ],
     writable=[
         "product_id", "sku", "variant_name", "barcode", "hsn_code", "gst_rate",
@@ -66,7 +68,7 @@ SUPPLIERS = Resource(
         "id", "name", "supplier_code", "supplier_type", "gstin", "pan", "gst_treatment",
         "city", "state_code", "state_name", "address", "pincode", "primary_contact_name",
         "phone", "email", "payment_terms", "payment_terms_days", "credit_limit", "status",
-        "bank_name", "bank_account_no", "bank_ifsc", "notes",
+        "bank_name", "bank_account_no", "bank_ifsc", "notes", "created_at", "updated_at",
     ],
     writable=[
         "name", "supplier_code", "supplier_type", "gstin", "pan", "gst_treatment",
@@ -84,6 +86,7 @@ GODOWNS = Resource(
     columns=[
         "id", "name", "code", "city", "state_code", "address", "gstin",
         "is_default", "is_active", "incharge_user_id", "capacity_value", "capacity_uom_id",
+        "created_at", "updated_at",
     ],
     writable=[
         "name", "code", "city", "state_code", "address", "gstin", "is_active",

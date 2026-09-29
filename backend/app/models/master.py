@@ -38,6 +38,7 @@ from app.models.base import (
     Rate,
     SoftDeleteMixin,
     TenantMixin,
+    TimestampMixin,
     UUIDPkMixin,
     enum_check,
     plain_fk,
@@ -113,7 +114,7 @@ class Uom(UUIDPkMixin, Base):
     __table_args__ = (enum_check("uom_type", ["count", "weight", "volume", "length"]),)
 
 
-class Product(UUIDPkMixin, TenantMixin, Base):
+class Product(UUIDPkMixin, TenantMixin, TimestampMixin, Base):
     """The catalogue item — the thing a buyer talks about. Stock never
     attaches here; see `ProductVariant`."""
 
@@ -143,7 +144,7 @@ class Product(UUIDPkMixin, TenantMixin, Base):
     )
 
 
-class ProductVariant(UUIDPkMixin, TenantMixin, Base):
+class ProductVariant(UUIDPkMixin, TenantMixin, TimestampMixin, Base):
     """The stockable, orderable, priced unit. **This is the SKU.** Everything
     in inventory and procurement references `product_variant_id`, never
     `product_id`. `currentStock`/`reserved`/`status`/`godowns[]` are
@@ -241,7 +242,7 @@ class ProductImage(UUIDPkMixin, TenantMixin, Base):
     )
 
 
-class Godown(UUIDPkMixin, TenantMixin, Base):
+class Godown(UUIDPkMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "godowns"
 
     name: Mapped[str] = mapped_column(Text, nullable=False)
@@ -264,7 +265,7 @@ class Godown(UUIDPkMixin, TenantMixin, Base):
     )
 
 
-class Supplier(UUIDPkMixin, TenantMixin, Base):
+class Supplier(UUIDPkMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "suppliers"
 
     name: Mapped[str] = mapped_column(Text, nullable=False)

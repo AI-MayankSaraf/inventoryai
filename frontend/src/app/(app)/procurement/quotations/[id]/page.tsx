@@ -28,7 +28,7 @@ import {
 import { useQuotation, useSetQuotationStatus } from "@/hooks/use-procurement";
 import { documentsApi } from "@/lib/api";
 import { round2 } from "@/lib/domain/money";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 import type { MoneyTotals } from "@/types";
 
 export default function QuotationDetailPage({
@@ -155,6 +155,8 @@ export default function QuotationDetailPage({
                   {q.status === "rejected" && (
                     <DetailRow label="Rejection Reason" value={q.rejectedReason || "—"} />
                   )}
+                  <DetailRow label="Created" value={q.createdAt ? formatDateTime(q.createdAt) : "—"} />
+                  <DetailRow label="Last Updated" value={q.updatedAt ? formatDateTime(q.updatedAt) : "—"} />
                 </DetailGrid>
               </SectionCard>
 

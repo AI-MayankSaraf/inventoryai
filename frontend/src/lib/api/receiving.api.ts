@@ -97,6 +97,10 @@ interface GrnOut {
   confirmed_by: string | null;
   confirmed_at: string | null;
   cancelled_at: string | null;
+  cancelled_by_name: string | null;
+  cancellation_reason: string | null;
+  created_at: string;
+  updated_at: string;
   has_discrepancy: boolean;
   remarks: string | null;
   row_version: number;
@@ -257,16 +261,12 @@ function toGoodsReceipt(o: GrnOut): GoodsReceipt {
     confirmedBy: o.confirmed_by,
     confirmedAt: o.confirmed_at,
     cancelledAt: o.cancelled_at,
-    // No backend field for a cancellation reason or for the
-    // reversal/reversed-by document link (`GrnOut` doesn't carry either) —
-    // known gaps. `getGoodsReceipt` below degrades gracefully: both
-    // sections simply show nothing for a real GRN instead of erroring.
-    cancellationReason: undefined,
-    reversedByGrnId: undefined,
-    reversalOfGrnId: undefined,
+    cancelledByName: o.cancelled_by_name ?? undefined,
+    cancellationReason: o.cancellation_reason ?? undefined,
     hasDiscrepancy: o.has_discrepancy,
     remarks: o.remarks ?? "",
-    createdAt: "",
+    createdAt: o.created_at,
+    updatedAt: o.updated_at,
     rowVersion: o.row_version,
   };
 }
@@ -718,11 +718,7 @@ export async function reverseGoodsReceipt(goodsReceiptId: Id, reason: string): P
 }
 
 export async function cancelDraftGoodsReceipt(goodsReceiptId: Id, reason: string): Promise<void> {
-  // `reason` has no backend field on this action (cancel takes no body) —
-  // kept only for the caller's confirmation dialog, not persisted server
-  // side. Known gap.
-  void reason;
-  await httpPost(`/procurement/goods-receipts/${goodsReceiptId}/cancel`);
+  await httpPost(`/procurement/goods-receipts/${goodsReceiptId}/cancel`, { reason: reason.trim() || undefined });
 }
 
 export const GRN_ISSUE_LABELS: Record<GrnIssueType, string> = {

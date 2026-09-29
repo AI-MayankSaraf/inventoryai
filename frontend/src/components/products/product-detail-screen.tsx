@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ArrowLeft, ImageIcon, PackagePlus, Truck, Warehouse } from "lucide-react";
+import { ArrowLeft, ImageIcon, Package, PackagePlus, Truck, Warehouse } from "lucide-react";
 
 import { AsyncBoundary, LoadingCard } from "@/components/common/async-state";
 import { AuditTrail } from "@/components/common/audit-trail";
@@ -27,7 +27,7 @@ import { GodownLevelsCard } from "@/components/products/godown-levels-card";
 import { UomConversionsCard } from "@/components/products/uom-conversions-card";
 import { useProduct } from "@/hooks/use-catalog";
 import { useStockByGodown, useVariantLedger } from "@/hooks/use-inventory";
-import { formatCurrency, formatDate, formatNumber } from "@/lib/format";
+import { formatCurrency, formatDate, formatDateTime, formatNumber } from "@/lib/format";
 import type { Id, StockState } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -68,8 +68,8 @@ export function ProductDetailScreen({ variantId }: { variantId: Id }) {
               <PageHeader
                 title={
                   <span className="flex items-center gap-3">
-                    <span className="flex size-11 items-center justify-center rounded-lg border border-border bg-card text-[22px]">
-                      {detail.product.displayEmoji ?? "📦"}
+                    <span className="flex size-11 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground">
+                      <Package className="size-5" />
                     </span>
                     {detail.product.name}
                   </span>
@@ -155,6 +155,8 @@ export function ProductDetailScreen({ variantId }: { variantId: Id }) {
                         <DetailRow label="MPN" value={detail.variant.mpn} mono />
                         <DetailRow label="HSN Code" value={detail.variant.hsnCode} mono />
                         <DetailRow label="Manufacturer" value={detail.product.manufacturerName} />
+                        <DetailRow label="Created" value={detail.variant.createdAt ? formatDateTime(detail.variant.createdAt) : "—"} />
+                        <DetailRow label="Last Updated" value={detail.variant.updatedAt ? formatDateTime(detail.variant.updatedAt) : "—"} />
                       </DetailGrid>
                     </div>
                   </SectionCard>

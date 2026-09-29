@@ -9,6 +9,7 @@ docs — which is what the frontend will code against — show real field names
 and constraints instead of a generic blob.
 """
 
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
@@ -66,6 +67,8 @@ class ProductOut(BaseModel):
     tracking_type: str
     base_uom_id: UUID
     is_active: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 # ------------------------------------------------------------- variants
@@ -123,6 +126,8 @@ class VariantOut(BaseModel):
     lead_time_days: Optional[int]
     attributes: dict
     is_active: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 # ------------------------------------------------------------ suppliers
@@ -201,6 +206,8 @@ class SupplierOut(BaseModel):
     bank_account_no: Optional[str] = None
     bank_ifsc: Optional[str] = None
     notes: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 # -------------------------------------------------------------- godowns
@@ -246,6 +253,8 @@ class GodownOut(BaseModel):
     incharge_user_id: Optional[UUID] = None
     capacity_value: Optional[float] = None
     capacity_uom_id: Optional[UUID] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 # ----------------------------------------------------------- categories

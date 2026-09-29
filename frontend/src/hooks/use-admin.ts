@@ -281,3 +281,45 @@ export function useRoleUsage(roleId: Id | undefined) {
 export function useDeleteRole(onSuccess?: () => void) {
   return useApiMutation(adminApi.deleteRole, { onSuccess: () => onSuccess?.() });
 }
+
+/* ----------------------------------------------------- Company pick-lists */
+
+export function useCompanyLists(options: { activeOnly?: boolean } = {}) {
+  return useApiQuery(["company-lists", !!options.activeOnly], () => adminApi.getCompanyLists(options));
+}
+
+/** The active values of one list, for a form's picker. */
+export function useListValues(key: adminApi.CompanyListKey): string[] {
+  const lists = useCompanyLists({ activeOnly: true });
+  return lists.data?.find((l) => l.key === key)?.items.map((i) => i.value) ?? [];
+}
+
+export function useAddListItem(onSuccess?: () => void) {
+  return useApiMutation(adminApi.addListItem, { onSuccess });
+}
+
+export function useUpdateListItem(onSuccess?: () => void) {
+  return useApiMutation(adminApi.updateListItem, { onSuccess });
+}
+
+export function useDeleteListItem(onSuccess?: () => void) {
+  return useApiMutation(adminApi.deleteListItem, { onSuccess });
+}
+
+/* ------------------------------------------------- Subscription plans */
+
+export function usePlans() {
+  return useApiQuery(["subscription-plans"], () => adminApi.listPlans());
+}
+
+export function useCreatePlan(onSuccess?: () => void) {
+  return useApiMutation(adminApi.createPlan, { onSuccess });
+}
+
+export function useUpdatePlan(onSuccess?: () => void) {
+  return useApiMutation(adminApi.updatePlan, { onSuccess });
+}
+
+export function useDeletePlan(onSuccess?: () => void) {
+  return useApiMutation(adminApi.deletePlan, { onSuccess });
+}

@@ -34,55 +34,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useListValues } from "@/hooks/use-admin";
 import { useCreateSupplier, useUpdateSupplier } from "@/hooks/use-suppliers";
 import type { suppliersApi } from "@/lib/api";
+import { INDIAN_STATES } from "@/lib/gst-states";
 import type { GstTreatment, Supplier, SupplierStatus, SupplierType } from "@/types";
 
 /** GST state-code table (`01`–`38`, plus the two special jurisdictions). */
-const INDIAN_STATES: { code: string; name: string }[] = [
-  { code: "01", name: "Jammu and Kashmir" },
-  { code: "02", name: "Himachal Pradesh" },
-  { code: "03", name: "Punjab" },
-  { code: "04", name: "Chandigarh" },
-  { code: "05", name: "Uttarakhand" },
-  { code: "06", name: "Haryana" },
-  { code: "07", name: "Delhi" },
-  { code: "08", name: "Rajasthan" },
-  { code: "09", name: "Uttar Pradesh" },
-  { code: "10", name: "Bihar" },
-  { code: "11", name: "Sikkim" },
-  { code: "12", name: "Arunachal Pradesh" },
-  { code: "13", name: "Nagaland" },
-  { code: "14", name: "Manipur" },
-  { code: "15", name: "Mizoram" },
-  { code: "16", name: "Tripura" },
-  { code: "17", name: "Meghalaya" },
-  { code: "18", name: "Assam" },
-  { code: "19", name: "West Bengal" },
-  { code: "20", name: "Jharkhand" },
-  { code: "21", name: "Odisha" },
-  { code: "22", name: "Chhattisgarh" },
-  { code: "23", name: "Madhya Pradesh" },
-  { code: "24", name: "Gujarat" },
-  { code: "25", name: "Daman and Diu" },
-  { code: "26", name: "Dadra and Nagar Haveli" },
-  { code: "27", name: "Maharashtra" },
-  { code: "28", name: "Andhra Pradesh (Old)" },
-  { code: "29", name: "Karnataka" },
-  { code: "30", name: "Goa" },
-  { code: "31", name: "Lakshadweep" },
-  { code: "32", name: "Kerala" },
-  { code: "33", name: "Tamil Nadu" },
-  { code: "34", name: "Puducherry" },
-  { code: "35", name: "Andaman and Nicobar Islands" },
-  { code: "36", name: "Telangana" },
-  { code: "37", name: "Andhra Pradesh" },
-  { code: "38", name: "Ladakh" },
-  { code: "97", name: "Other Territory" },
-  { code: "99", name: "Centre Jurisdiction" },
-];
-
-const SUPPLIER_TYPES: SupplierType[] = ["Manufacturer", "Distributor", "Online", "Local Supplier", "Importer"];
 
 const GST_TREATMENTS: { value: GstTreatment; label: string }[] = [
   { value: "regular", label: "Regular" },
@@ -123,7 +81,7 @@ function toFormState(s?: Supplier): FormState {
     gstin: s?.gstin ?? "",
     pan: s?.pan ?? "",
     gstTreatment: s?.gstTreatment ?? "regular",
-    supplierType: s?.supplierType ?? "Distributor",
+    supplierType: s?.supplierType ?? "",
     city: s?.city ?? "",
     stateCode: s?.stateCode ?? "",
     address: s?.address ?? "",
@@ -140,6 +98,11 @@ function toFormState(s?: Supplier): FormState {
   };
 }
 
+/** The list's values, plus `current` when it is set and not among them. */
+function withCurrent(values: string[], current: string): string[] {
+  return current && !values.includes(current) ? [...values, current] : values;
+}
+
 export function SupplierFormDialog({
   supplier,
   onSaved,
@@ -152,6 +115,16 @@ export function SupplierFormDialog({
   const isEdit = !!supplier;
   const [open, setOpen] = React.useState(false);
   const [form, setForm] = React.useState<FormState>(() => toFormState(supplier));
+
+  // From Settings > Lists. A value this supplier already has stays
+  // selectable even if the list has since dropped or switched it off.
+  const typeOptions = withCurrent(useListValues("supplier_type"), form.supplierType);
+  const paymentTermOptions = withCurrent(useListValues("payment_terms"), form.paymentTerms);
+  React.useEffect(() => {
+    if (!form.supplierType && typeOptions.length) {
+      setForm((prev) => ({ ...prev, supplierType: typeOptions.includes("Distributor") ? "Distributor" : typeOptions[0] }));
+    }
+  }, [form.supplierType, typeOptions]);
 
   const create = useCreateSupplier((s) => {
     onSaved?.(s);
@@ -273,12 +246,12 @@ export function SupplierFormDialog({
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="sf-type">Supplier Type</Label>
-              <Select value={form.supplierType} onValueChange={(v) => set("supplierType", v as SupplierType)}>
+              <Select value={form.supplierType || undefined} onValueChange={(v) => set("supplierType", v as SupplierType)}>
                 <SelectTrigger id="sf-type">
-                  <SelectValue />
+                  <SelectValue placeholder="Select type" />
                 </SelectTrigger>
                 <SelectContent>
-                  {SUPPLIER_TYPES.map((t) => (
+                  {typeOptions.map((t) => (
                     <SelectItem key={t} value={t}>
                       {t}
                     </SelectItem>
@@ -368,12 +341,18 @@ export function SupplierFormDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="sf-payment-terms">Payment Terms</Label>
-              <Input
-                id="sf-payment-terms"
-                value={form.paymentTerms}
-                onChange={(e) => set("paymentTerms", e.target.value)}
-                placeholder="e.g. 30 Days"
-              />
+              <Select value={form.paymentTerms || undefined} onValueChange={(v) => set("paymentTerms", v)}>
+                <SelectTrigger id="sf-payment-terms">
+                  <SelectValue placeholder="Select payment terms" />
+                </SelectTrigger>
+                <SelectContent>
+                  {paymentTermOptions.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {t}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="sf-payment-terms-days">Payment Terms (days)</Label>

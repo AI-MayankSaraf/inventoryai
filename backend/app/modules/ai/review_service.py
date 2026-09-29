@@ -23,7 +23,6 @@ it got wrong.
 from __future__ import annotations
 
 import json
-from datetime import date
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID, uuid4
@@ -32,6 +31,7 @@ from fastapi import Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core import audit
 from app.core.db import set_tenant
 from app.core.errors import (
@@ -772,7 +772,7 @@ async def _promote(
     through this one call.
     """
     number = fields.get("document_number") or _fallback_number(result)
-    doc_date = parse_date(fields.get("document_date")) or date.today()
+    doc_date = parse_date(fields.get("document_date")) or clock.today()
 
     if target == "supplier_quotation":
         from app.modules.procurement import quotation_service

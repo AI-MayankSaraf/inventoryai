@@ -37,7 +37,7 @@ import {
 import { useApiMutation } from "@/hooks/use-api";
 import { useRfq, useSendRfq } from "@/hooks/use-procurement";
 import { procurementApi } from "@/lib/api";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 import type { Id } from "@/types";
 
 function CancelRfqDialog({ rfqId, onDone }: { rfqId: Id; onDone: () => void }) {
@@ -169,6 +169,8 @@ export function RfqDetailScreen({ id }: { id: Id }) {
                   />
                   <DetailRow label="Estimated Value" value={formatCurrency(detail.rfq.estimatedValue)} />
                   <DetailRow label="Notes" value={detail.rfq.notes || "—"} />
+                  <DetailRow label="Created" value={detail.rfq.createdAt ? formatDateTime(detail.rfq.createdAt) : "—"} />
+                  <DetailRow label="Last Updated" value={detail.rfq.updatedAt ? formatDateTime(detail.rfq.updatedAt) : "—"} />
                 </DetailGrid>
               </SectionCard>
 

@@ -41,6 +41,7 @@ from app.modules.ops.router import router as ops_router
 from app.modules.platform.admin_router import router as platform_admin_router
 from app.modules.platform.console_router import router as platform_console_router
 from app.modules.platform.router import router as company_router
+from app.modules.platform.lists_router import router as company_lists_router
 from app.modules.procurement.router import router as procurement_router
 
 settings = get_settings()
@@ -163,6 +164,7 @@ app.include_router(users_router)
 app.include_router(catalog_router)
 app.include_router(catalog_detail_router)
 app.include_router(company_router)
+app.include_router(company_lists_router)
 app.include_router(platform_admin_router)
 app.include_router(platform_console_router)
 app.include_router(procurement_router)

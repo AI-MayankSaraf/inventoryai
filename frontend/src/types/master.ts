@@ -14,7 +14,8 @@ import type {
 
 /* ------------------------------------------------------------- Tenancy */
 
-export type CompanyPlan = "Trial" | "Starter" | "Growth" | "Enterprise";
+/** A `subscription_plans` name, managed in the platform console. */
+export type CompanyPlan = string;
 export type CompanyStatus = "active" | "suspended";
 
 export interface Company {
@@ -306,7 +307,6 @@ export interface Product extends SoftDeletable, AuditFields {
   cessRate: Percent;
   trackingType: TrackingType;
   baseUomId: Id;
-  displayEmoji?: string;
 }
 
 /**
@@ -377,7 +377,8 @@ export interface Godown extends SoftDeletable, AuditFields {
 
 /* ------------------------------------------------------------ Suppliers */
 
-export type SupplierType = "Manufacturer" | "Distributor" | "Online" | "Local Supplier" | "Importer";
+/** A value from the company's own "Supplier types" list (Settings). */
+export type SupplierType = string;
 export type GstTreatment = "regular" | "composition" | "unregistered" | "overseas";
 export type SupplierStatus = "active" | "inactive";
 

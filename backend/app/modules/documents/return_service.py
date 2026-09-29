@@ -20,7 +20,7 @@ supplier gets a debit note for goods they never delivered.
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+from datetime import datetime, time, timezone
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID, uuid4
@@ -29,6 +29,7 @@ from fastapi import Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core import audit, inventory as ledger, numbering
 from app.core.db import set_tenant
 from app.core.deps import assert_godown_in_scope, scoped_godown_filter
@@ -245,8 +246,8 @@ async def create_return(
     if supplier is None:
         raise ApiError(status.HTTP_404_NOT_FOUND, CODE_NOT_FOUND, "Supplier not found")
 
-    return_date = body.return_date or date.today()
-    if return_date > date.today():
+    return_date = body.return_date or clock.today()
+    if clock.is_future_day(return_date):
         raise ApiError(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             CODE_BUSINESS_RULE_VIOLATION,

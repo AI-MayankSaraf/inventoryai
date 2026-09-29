@@ -69,6 +69,7 @@ import {
   useOnboardCompany,
   usePlatformActivity,
   usePlatformKpis,
+  usePlans,
   usePlatformUsers,
   useRemoveCompanyMember,
   useResendCompanyInvitation,
@@ -84,6 +85,7 @@ import { countActiveOwners } from "@/lib/api/admin.api";
 import type { CompanyListRow, CompanyMember, DirectoryUserRow, PlatformUserRow } from "@/lib/api/admin.api";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { INDIAN_STATES } from "@/lib/gst-states";
+import { PlansPanel, planOptions } from "@/components/admin/plans-panel";
 import type { AuditLog, Company, CompanyStatus, Id } from "@/types";
 
 /**
@@ -107,7 +109,6 @@ const STATUS_VALUES: Record<string, CompanyStatus> = {
   Suspended: "suspended",
 };
 
-const PLANS: Company["plan"][] = ["Trial", "Starter", "Growth", "Enterprise"];
 
 function initials(name: string) {
   return name.split(" ").map((p) => p[0]).filter(Boolean).join("").slice(0, 2).toUpperCase();
@@ -153,6 +154,7 @@ export function SystemAdminScreen() {
             Users
           </TabsTrigger>
           <TabsTrigger value="impersonate">Impersonate</TabsTrigger>
+          <TabsTrigger value="plans">Plans</TabsTrigger>
           <TabsTrigger value="activity">Platform Activity</TabsTrigger>
         </TabsList>
 
@@ -168,6 +170,10 @@ export function SystemAdminScreen() {
           <ImpersonateTab companies={companiesForPicker.data?.items ?? []} />
         </TabsContent>
 
+        <TabsContent value="plans" className="mt-4">
+          <PlansPanel onChanged={refresh} />
+        </TabsContent>
+
         <TabsContent value="activity" className="mt-4">
           <PlatformActivityTab version={version} />
         </TabsContent>
@@ -179,6 +185,7 @@ export function SystemAdminScreen() {
 /* -------------------------------------------------------------- Companies */
 
 function CompaniesTab({ version, onChanged }: { version: number; onChanged: () => void }) {
+  const plans = usePlans();
   const controls = useListControls({ sort: "name" });
   const state = useCompanies({ ...controls.params, _v: version } as never);
 
@@ -200,7 +207,7 @@ function CompaniesTab({ version, onChanged }: { version: number; onChanged: () =
           <>
             <FilterSelect
               placeholder="All Plans"
-              options={PLANS}
+              options={(plans.data ?? []).map((p) => p.name)}
               value={controls.filters.plan}
               onValueChange={(v) => controls.setFilter("plan", v)}
             />
@@ -831,6 +838,7 @@ function LinkedOwnersTable({
 }
 
 function CompanyDetailsForm({ company, onChanged }: { company: CompanyListRow; onChanged: () => void }) {
+  const plans = usePlans();
   const [form, setForm] = React.useState({
     name: company.name,
     legalName: company.legalName ?? "",
@@ -871,7 +879,7 @@ function CompanyDetailsForm({ company, onChanged }: { company: CompanyListRow; o
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {PLANS.map((p) => (
+              {planOptions(plans.data, company.plan).map((p) => (
                 <SelectItem key={p} value={p}>
                   {p}
                 </SelectItem>
@@ -1258,6 +1266,7 @@ const EMPTY_ONBOARD = {
 };
 
 function OnboardCompanyDialog({ onDone }: { onDone: () => void }) {
+  const plans = usePlans();
   const [open, setOpen] = React.useState(false);
   const [form, setForm] = React.useState(EMPTY_ONBOARD);
   const [invited, setInvited] = React.useState<{ email: string; token?: string; linked: boolean } | null>(null);
@@ -1373,7 +1382,7 @@ function OnboardCompanyDialog({ onDone }: { onDone: () => void }) {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {PLANS.map((p) => (
+                    {planOptions(plans.data).map((p) => (
                       <SelectItem key={p} value={p}>
                         {p}
                       </SelectItem>

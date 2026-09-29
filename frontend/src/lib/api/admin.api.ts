@@ -98,6 +98,8 @@ interface GodownOut {
   incharge_user_id: string | null;
   capacity_value: number | null;
   capacity_uom_id: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 interface CompanyProfileOut {
@@ -120,6 +122,9 @@ interface CompanyProfileOut {
   plan: string;
   status: string;
   onboarded_on: string;
+  suspended_at: string | null;
+  suspended_reason: string | null;
+  owner_email: string | null;
 }
 
 interface CompanySettingsOut {
@@ -218,13 +223,10 @@ function toCompany(o: CompanyProfileOut): Company {
     // defensively also leaves an already-capitalised value untouched.
     plan: capitalize(o.plan) as Company["plan"],
     status: o.status as Company["status"],
-    // No backend field for suspension metadata or the owning account's
-    // email on this endpoint — known gap, not rendered by the profile
-    // screen today.
-    suspendedAt: null,
-    suspendedReason: null,
+    suspendedAt: o.suspended_at,
+    suspendedReason: o.suspended_reason,
     onboardedOn: o.onboarded_on,
-    ownerEmail: "",
+    ownerEmail: o.owner_email ?? "",
   };
 }
 
@@ -311,8 +313,8 @@ function toGodown(g: GodownOut, inchargeName = ""): Godown {
     isDefault: g.is_default,
     isActive: g.is_active,
     deletedAt: null,
-    createdAt: "",
-    updatedAt: "",
+    createdAt: g.created_at,
+    updatedAt: g.updated_at,
   };
 }
 
@@ -780,9 +782,8 @@ export async function updateCompanyProfile(patch: Partial<Company>): Promise<Com
   if (patch.pincode !== undefined) body.pincode = patch.pincode;
   if (patch.email !== undefined) body.email = patch.email;
   if (patch.phone !== undefined) body.phone = patch.phone;
-  // `plan`/`status`/`suspendedAt`/`suspendedReason`/`ownerEmail` have no
-  // write path on this endpoint (plan/status are platform-managed, the rest
-  // have no backend column) — dropped if present, known gap.
+  // `plan`/`status`/`suspendedAt`/`suspendedReason`/`ownerEmail` are
+  // managed from the platform console, not by the company itself.
 
   const out = await httpPatch<CompanyProfileOut>("/company/profile", body);
   return toCompany(out);
@@ -1575,4 +1576,122 @@ export async function getRoleUsage(roleId: Id): Promise<{ inUse: boolean; reason
 export async function deleteRole(roleId: Id): Promise<void> {
   await httpDelete(`/roles/${roleId}`);
   roleCache = null;
+}
+
+/* ----------------------------------------------------- Company pick-lists */
+
+/** The lists a company edits in Settings (`/company/lists`). */
+export type CompanyListKey = "payment_terms" | "delivery_terms" | "supplier_type";
+
+export interface CompanyListItem {
+  id: Id;
+  listKey: CompanyListKey;
+  value: string;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+export interface CompanyList {
+  key: CompanyListKey;
+  label: string;
+  items: CompanyListItem[];
+}
+
+interface ListItemOut {
+  id: string;
+  list_key: CompanyListKey;
+  value: string;
+  sort_order: number;
+  is_active: boolean;
+}
+
+function toListItem(o: ListItemOut): CompanyListItem {
+  return { id: o.id, listKey: o.list_key, value: o.value, sortOrder: o.sort_order, isActive: o.is_active };
+}
+
+export async function getCompanyLists(options: { activeOnly?: boolean } = {}): Promise<CompanyList[]> {
+  const out = await httpGet<{ key: CompanyListKey; label: string; items: ListItemOut[] }[]>(
+    "/company/lists",
+    options.activeOnly ? { active_only: true } : undefined,
+  );
+  return out.map((l) => ({ key: l.key, label: l.label, items: l.items.map(toListItem) }));
+}
+
+export async function addListItem(input: { listKey: CompanyListKey; value: string }): Promise<CompanyListItem> {
+  if (!input.value.trim()) validationFailed([{ field: "value", message: "Enter a value." }]);
+  return toListItem(await httpPost<ListItemOut>("/company/lists", { list_key: input.listKey, value: input.value }));
+}
+
+export async function updateListItem(input: {
+  id: Id;
+  patch: Partial<Pick<CompanyListItem, "value" | "sortOrder" | "isActive">>;
+}): Promise<CompanyListItem> {
+  const body: Record<string, unknown> = {};
+  if (input.patch.value !== undefined) body.value = input.patch.value;
+  if (input.patch.sortOrder !== undefined) body.sort_order = input.patch.sortOrder;
+  if (input.patch.isActive !== undefined) body.is_active = input.patch.isActive;
+  return toListItem(await httpPatch<ListItemOut>(`/company/lists/${input.id}`, body));
+}
+
+export async function deleteListItem(id: Id): Promise<void> {
+  await httpDelete(`/company/lists/${id}`);
+}
+
+/* ------------------------------------------------- Subscription plans */
+
+export interface SubscriptionPlan {
+  id: Id;
+  name: string;
+  description: string;
+  sortOrder: number;
+  isActive: boolean;
+  companyCount: number;
+}
+
+interface PlanOut {
+  id: string;
+  name: string;
+  description: string | null;
+  sort_order: number;
+  is_active: boolean;
+  company_count: number;
+}
+
+function toPlan(o: PlanOut): SubscriptionPlan {
+  return {
+    id: o.id,
+    name: o.name,
+    description: o.description ?? "",
+    sortOrder: o.sort_order,
+    isActive: o.is_active,
+    companyCount: o.company_count,
+  };
+}
+
+export async function listPlans(): Promise<SubscriptionPlan[]> {
+  return (await httpGet<PlanOut[]>("/platform/plans")).map(toPlan);
+}
+
+export async function createPlan(input: { name: string; description?: string }): Promise<SubscriptionPlan> {
+  if (!input.name.trim()) validationFailed([{ field: "name", message: "Give the plan a name." }]);
+  return toPlan(await httpPost<PlanOut>("/platform/plans", {
+    name: input.name.trim(),
+    description: input.description?.trim() || undefined,
+  }));
+}
+
+export async function updatePlan(input: {
+  id: Id;
+  patch: Partial<Pick<SubscriptionPlan, "name" | "description" | "sortOrder" | "isActive">>;
+}): Promise<SubscriptionPlan> {
+  const body: Record<string, unknown> = {};
+  if (input.patch.name !== undefined) body.name = input.patch.name;
+  if (input.patch.description !== undefined) body.description = input.patch.description;
+  if (input.patch.sortOrder !== undefined) body.sort_order = input.patch.sortOrder;
+  if (input.patch.isActive !== undefined) body.is_active = input.patch.isActive;
+  return toPlan(await httpPatch<PlanOut>(`/platform/plans/${input.id}`, body));
+}
+
+export async function deletePlan(id: Id): Promise<void> {
+  await httpDelete(`/platform/plans/${id}`);
 }

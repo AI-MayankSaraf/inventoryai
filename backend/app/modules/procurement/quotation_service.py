@@ -21,7 +21,6 @@ at the point it matters (comparison build/convert) rather than mutating
 
 from __future__ import annotations
 
-from datetime import date
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID, uuid4
@@ -30,6 +29,7 @@ from fastapi import Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core import audit
 from app.core.errors import (
     CODE_DUPLICATE,
@@ -53,7 +53,7 @@ async def _load(session: AsyncSession, *, company_id: str, quotation_id: UUID) -
                 "SELECT id, quotation_number, supplier_id, rfq_id, quotation_date, valid_until, currency_code, "
                 "subtotal, discount_amount, taxable_value, tax_amount, freight_amount, other_charges, round_off, "
                 "total_amount, payment_terms, delivery_terms, delivery_period_days, warranty_terms, freight_terms, "
-                "source, status, approved_by, approved_at, rejected_reason, row_version "
+                "source, status, approved_by, approved_at, rejected_reason, row_version, created_at, updated_at "
                 "FROM supplier_quotations WHERE id = :id AND company_id = :c"
             ),
             {"id": quotation_id, "c": company_id},
@@ -77,7 +77,7 @@ async def _load(session: AsyncSession, *, company_id: str, quotation_id: UUID) -
     out = dict(header)
     out["items"] = [dict(r) for r in items]
     out["item_count"] = len(items)
-    out["is_expired"] = bool(out["valid_until"] and out["valid_until"] < date.today())
+    out["is_expired"] = bool(out["valid_until"] and out["valid_until"] < clock.today())
     return out
 
 
@@ -108,7 +108,7 @@ async def list_quotations(
                 "SELECT id, quotation_number, supplier_id, rfq_id, quotation_date, valid_until, currency_code, "
                 "subtotal, discount_amount, taxable_value, tax_amount, freight_amount, other_charges, round_off, "
                 "total_amount, payment_terms, delivery_terms, delivery_period_days, warranty_terms, freight_terms, "
-                "source, status, approved_by, approved_at, rejected_reason, row_version, "
+                "source, status, approved_by, approved_at, rejected_reason, row_version, created_at, updated_at, "
                 "(SELECT COUNT(*) FROM supplier_quotation_items sqi "
                 " WHERE sqi.quotation_id = supplier_quotations.id AND sqi.company_id = supplier_quotations.company_id"
                 ") AS item_count "
@@ -119,7 +119,7 @@ async def list_quotations(
         )
     ).mappings().all()
     return [
-        {**dict(r), "items": [], "is_expired": bool(r["valid_until"] and r["valid_until"] < date.today())}
+        {**dict(r), "items": [], "is_expired": bool(r["valid_until"] and r["valid_until"] < clock.today())}
         for r in rows
     ]
 
@@ -307,7 +307,7 @@ async def create_quotation(
         )
 
     quotation_id = uuid4()
-    quotation_date = body.quotation_date or date.today()
+    quotation_date = body.quotation_date or clock.today()
 
     # Header first (placeholder totals), then items: same ordering fix as
     # PO/GRN — items carry a NOT NULL FK to the header.

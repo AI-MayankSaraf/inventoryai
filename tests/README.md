@@ -34,6 +34,7 @@ The Python tests use the backend's virtualenv (they need `openpyxl` and
 | `browser_supplier_portal.js` | The Supplier Portal as staff and supplier use it |
 | `browser_godowns_numbering_register.js` | Godown in-charge and capacity, document-number previews, purchase register |
 | `browser_screen_walk.js` | Opens every screen and reports any API or console error |
+| `browser_lists_plans_records.js` | Settings → Lists feeding the PO and supplier forms, subscription plans in the console, assistant suggestions, PO notes, GRN cancel reason, record dates |
 
 ## Running
 

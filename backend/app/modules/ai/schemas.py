@@ -322,3 +322,8 @@ class EmbeddingStatusOut(BaseModel):
     rebuilding: bool = False
     rebuild_embedded: int = 0
     last_error: Optional[str] = None
+
+
+class AssistantSuggestionOut(BaseModel):
+    intent: str
+    question: str

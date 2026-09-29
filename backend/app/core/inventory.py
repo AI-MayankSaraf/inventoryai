@@ -29,6 +29,7 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core.errors import (
     CODE_BATCH_EXPIRED,
     CODE_BATCH_REQUIRED,
@@ -134,7 +135,7 @@ async def assert_batch_ok(
             {"c": company_id, "b": batch_id},
         )
     ).scalar_one_or_none()
-    if expires_on is not None and expires_on < date.today() and not override_expiry:
+    if expires_on is not None and expires_on < clock.today() and not override_expiry:
         raise ApiError(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             CODE_BATCH_EXPIRED,

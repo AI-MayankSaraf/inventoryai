@@ -36,6 +36,8 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
+
 DOC_TYPES = ("rfq", "po", "grn", "proforma", "invoice", "transfer", "return", "adjustment")
 
 _DEFAULT_PREFIXES = {
@@ -82,7 +84,7 @@ async def allocate(
     if doc_type not in DOC_TYPES:
         raise NumberingError(f"Unknown document type: {doc_type}")
 
-    on = on or date.today()
+    on = on or clock.today()
 
     start_month = (
         await session.execute(

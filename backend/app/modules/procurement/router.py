@@ -388,10 +388,11 @@ async def confirm_grn(
 async def cancel_grn(
     grn_id: UUID,
     request: Request,
+    body: Optional[schemas.GrnCancelRequest] = None,
     claims: AccessTokenClaims = Depends(require_permission("grn.update")),
     session: AsyncSession = Depends(get_tenant_session),
 ):
-    return await grn_service.cancel_grn(session, claims=claims, grn_id=grn_id, request=request)
+    return await grn_service.cancel_grn(session, claims=claims, grn_id=grn_id, body=body, request=request)
 
 
 @router.post("/goods-receipts/{grn_id}/reverse", response_model=schemas.GrnOut)

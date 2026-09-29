@@ -45,7 +45,11 @@ router = APIRouter(prefix="/company", tags=["company"])
 _PROFILE_COLUMNS = [
     "id", "name", "legal_name", "gstin", "pan", "state_code", "state_name",
     "city", "address_line1", "address_line2", "pincode", "email", "phone",
-    "plan", "status", "onboarded_on",
+    "plan", "status", "onboarded_on", "suspended_at", "suspended_reason",
+    # The company's Owner: the earliest active user holding the owner role.
+    "(SELECT u.email FROM users u JOIN roles r ON r.id = u.role_id "
+    " WHERE u.company_id = companies.id AND r.code = 'owner' AND u.deleted_at IS NULL "
+    " ORDER BY u.created_at LIMIT 1) AS owner_email",
 ]
 
 _SETTINGS_COLUMNS = [

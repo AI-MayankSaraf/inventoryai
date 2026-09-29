@@ -21,7 +21,7 @@ other three weights slot in without changing this function's shape.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID, uuid4
@@ -30,6 +30,7 @@ from fastapi import Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core import audit
 from app.core.db import set_tenant
 from app.core.errors import (
@@ -204,7 +205,7 @@ async def _gather_matrix(
             }
         )
 
-    today = date.today()
+    today = clock.today()
     suppliers_out = []
     covered_by_quotation: dict = {}
     for row in rows_out:
@@ -260,7 +261,7 @@ async def _load(session: AsyncSession, *, company_id: str, comparison_id: UUID) 
         await session.execute(
             text(
                 "SELECT id, rfq_id, name, compared_supplier_ids, strategy, single_supplier_best_total, "
-                "split_total, projected_savings, decided_by, decided_at, status, notes "
+                "split_total, projected_savings, decided_by, decided_at, status, notes, created_at, updated_at "
                 "FROM quotation_comparisons WHERE id = :id AND company_id = :c"
             ),
             {"id": comparison_id, "c": company_id},
@@ -544,7 +545,7 @@ async def convert_comparison(
             raise ApiError(status.HTTP_404_NOT_FOUND, CODE_NOT_FOUND, "Quotation line not found")
         if qi["status"] != "approved":
             raise ApiError(status.HTTP_422_UNPROCESSABLE_ENTITY, CODE_BUSINESS_RULE_VIOLATION, "Only an approved quotation can be converted")
-        if qi["valid_until"] and qi["valid_until"] < date.today() and not body.allow_expired:
+        if qi["valid_until"] and qi["valid_until"] < clock.today() and not body.allow_expired:
             raise ApiError(
                 status.HTTP_422_UNPROCESSABLE_ENTITY, CODE_QUOTATION_EXPIRED,
                 f"Quotation for supplier {qi['supplier_id']} expired on {qi['valid_until']}; pass allow_expired to use it anyway",
@@ -586,7 +587,7 @@ async def convert_comparison(
         terms = quote_terms.get(lines[0]["quotation_id"]) or {}
         expected = body.expected_delivery_date or rfq_expected
         if expected is None and terms.get("delivery_period_days"):
-            expected = date.today() + timedelta(days=int(terms["delivery_period_days"]))
+            expected = clock.today() + timedelta(days=int(terms["delivery_period_days"]))
         po_body = PoCreate(
             supplier_id=supplier_id,
             delivery_godown_id=body.delivery_godown_id,

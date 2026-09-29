@@ -19,7 +19,6 @@ comparisons come back clean.
 
 from __future__ import annotations
 
-from datetime import date
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID, uuid4
@@ -28,6 +27,7 @@ from fastapi import Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core import audit
 from app.core.db import set_tenant
 from app.core.errors import (
@@ -297,7 +297,7 @@ async def create_invoice(
     if supplier is None:
         raise ApiError(status.HTTP_404_NOT_FOUND, CODE_NOT_FOUND, "Supplier not found")
 
-    if body.invoice_date > date.today():
+    if clock.is_future_day(body.invoice_date):
         raise ApiError(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             CODE_BUSINESS_RULE_VIOLATION,

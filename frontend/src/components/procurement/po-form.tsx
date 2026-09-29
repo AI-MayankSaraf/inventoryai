@@ -11,6 +11,7 @@ import { TaxSummary } from "@/components/procurement/tax-summary";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -26,7 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useCompanySettings, useNextDocumentNumber } from "@/hooks/use-admin";
+import { useCompanySettings, useListValues, useNextDocumentNumber } from "@/hooks/use-admin";
 import { useGodowns, useProducts, useUoms } from "@/hooks/use-catalog";
 import { useCreatePurchaseOrder } from "@/hooks/use-procurement";
 import { useSuppliers } from "@/hooks/use-suppliers";
@@ -36,8 +37,6 @@ import { formatCurrency } from "@/lib/format";
 import type { procurementApi } from "@/lib/api";
 import type { Id, TaxableLine } from "@/types";
 
-const PAYMENT_TERMS = ["Advance", "15 Days", "30 Days", "45 Days", "Cash on Delivery"];
-const DELIVERY_TERMS = ["FOR", "Ex-Works", "Door Delivery", "To Pay"];
 
 interface DraftLine {
   key: string;
@@ -91,9 +90,24 @@ export function PoForm() {
   const [poDate, setPoDate] = React.useState(() => new Date().toISOString().slice(0, 10));
   const [expectedDeliveryDate, setExpectedDeliveryDate] = React.useState("");
   const [deliveryGodownId, setDeliveryGodownId] = React.useState<Id | "">("");
-  const [paymentTerms, setPaymentTerms] = React.useState("30 Days");
-  const [deliveryTerms, setDeliveryTerms] = React.useState("FOR");
+  // Offered from Settings > Lists. Until the user picks, default to "30
+  // Days" / "FOR" when the company keeps them, else to the first value.
+  const paymentTermOptions = useListValues("payment_terms");
+  const deliveryTermOptions = useListValues("delivery_terms");
+  const [paymentTerms, setPaymentTerms] = React.useState("");
+  const [deliveryTerms, setDeliveryTerms] = React.useState("");
+  React.useEffect(() => {
+    if (!paymentTerms && paymentTermOptions.length) {
+      setPaymentTerms(paymentTermOptions.includes("30 Days") ? "30 Days" : paymentTermOptions[0]);
+    }
+  }, [paymentTerms, paymentTermOptions]);
+  React.useEffect(() => {
+    if (!deliveryTerms && deliveryTermOptions.length) {
+      setDeliveryTerms(deliveryTermOptions.includes("FOR") ? "FOR" : deliveryTermOptions[0]);
+    }
+  }, [deliveryTerms, deliveryTermOptions]);
   const [freight, setFreight] = React.useState(0);
+  const [notes, setNotes] = React.useState("");
   const [lines, setLines] = React.useState<DraftLine[]>([blankLine()]);
 
   const suppliers = suppliersState.data?.items ?? [];
@@ -166,6 +180,7 @@ export function PoForm() {
       paymentTerms,
       deliveryTerms,
       freightAmount: freight,
+      notes,
       lines: lines.map((l) => ({
         productVariantId: l.productVariantId as Id,
         quantity: l.quantity,
@@ -250,12 +265,12 @@ export function PoForm() {
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="po-payment">Payment Terms</Label>
-            <Select value={paymentTerms} onValueChange={setPaymentTerms}>
+            <Select value={paymentTerms || undefined} onValueChange={setPaymentTerms}>
               <SelectTrigger id="po-payment">
-                <SelectValue />
+                <SelectValue placeholder="Select payment terms" />
               </SelectTrigger>
               <SelectContent>
-                {PAYMENT_TERMS.map((t) => (
+                {paymentTermOptions.map((t) => (
                   <SelectItem key={t} value={t}>
                     {t}
                   </SelectItem>
@@ -265,12 +280,12 @@ export function PoForm() {
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="po-delivery-terms">Delivery Terms</Label>
-            <Select value={deliveryTerms} onValueChange={setDeliveryTerms}>
+            <Select value={deliveryTerms || undefined} onValueChange={setDeliveryTerms}>
               <SelectTrigger id="po-delivery-terms">
-                <SelectValue />
+                <SelectValue placeholder="Select delivery terms" />
               </SelectTrigger>
               <SelectContent>
-                {DELIVERY_TERMS.map((t) => (
+                {deliveryTermOptions.map((t) => (
                   <SelectItem key={t} value={t}>
                     {t}
                   </SelectItem>
@@ -295,6 +310,16 @@ export function PoForm() {
             {create.fieldErrors.deliveryGodownId && (
               <p className="text-[11.5px] text-destructive">{create.fieldErrors.deliveryGodownId}</p>
             )}
+          </div>
+          <div className="space-y-1.5 sm:col-span-2 lg:col-span-3">
+            <Label htmlFor="po-notes">Notes</Label>
+            <Textarea
+              id="po-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Anything the team or the supplier should know about this order"
+              rows={2}
+            />
           </div>
         </div>
       </SectionCard>

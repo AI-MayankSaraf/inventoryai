@@ -43,4 +43,7 @@ export const INDIAN_STATES: { code: string; name: string }[] = [
   { code: "36", name: "Telangana" },
   { code: "37", name: "Andhra Pradesh" },
   { code: "38", name: "Ladakh" },
+  // GST special codes: a supplier can be registered under these.
+  { code: "97", name: "Other Territory" },
+  { code: "99", name: "Centre Jurisdiction" },
 ];

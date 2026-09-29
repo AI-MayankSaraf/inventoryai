@@ -777,6 +777,11 @@ export async function listCanonicalFields(documentType?: BusinessDocumentType): 
  * server-side, the intent picks a hand-written parameterised query, and the
  * answer says which one it was.
  */
+/** Example questions, one per kind of question the assistant can answer. */
+export async function getAssistantSuggestions(): Promise<string[]> {
+  return (await httpGet<{ intent: string; question: string }[]>("/ai/assistant/suggestions")).map((s) => s.question);
+}
+
 export async function askAssistant(question: string): Promise<AssistantAnswer> {
   const o = await httpPost<{
     intent: string;

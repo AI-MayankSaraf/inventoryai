@@ -30,13 +30,34 @@ from app.core.security import AccessTokenClaims
 
 _INTENTS: list[tuple[str, re.Pattern[str]]] = [
     ("out_of_stock", re.compile(r"out of stock|zero stock|nothing left|stocked out", re.I)),
-    ("low_stock", re.compile(r"low stock|reorder|running out|need to order|below (the )?minimum", re.I)),
+    ("low_stock", re.compile(
+        r"low (on )?stock|stock (is )?(running )?low|reorder|running (out|low)|need to order|below (the )?minimum", re.I)),
     ("inventory_value", re.compile(r"inventory value|stock value|worth|valuation", re.I)),
     # `orders?` rather than `order\b`: "open purchase orders" is how anyone
     # actually asks this, and `\b` after "order" does not match the plural.
-    ("open_purchase_orders", re.compile(r"(pending|open|outstanding)[\w\s]{0,14}(orders?|pos?)\b|\bpos?\b[\w\s]{0,14}(pending|open)", re.I)),
+    # Either word order: "pending orders" and "orders still pending".
+    ("open_purchase_orders", re.compile(
+        r"(pending|open|outstanding)[\w\s]{0,14}(orders?|pos?)\b"
+        r"|\b(pos?|orders?)\b[\w\s]{0,20}(pending|open|outstanding)", re.I)),
     ("open_variances", re.compile(r"variance|mismatch|dispute|discrepanc", re.I)),
 ]
+
+#: One example question per intent, in the order the screen offers them.
+#: Served by `GET /ai/assistant/suggestions`, so the suggestions can only
+#: ever be questions this module actually answers.
+EXAMPLES: dict[str, str] = {
+    "out_of_stock": "What is out of stock?",
+    "low_stock": "What is low on stock?",
+    "inventory_value": "What is my inventory worth?",
+    "open_purchase_orders": "Which purchase orders are still pending?",
+    "open_variances": "Are there any unresolved variances?",
+}
+assert set(EXAMPLES) == {intent for intent, _ in _INTENTS}
+
+
+def suggestions() -> list[dict]:
+    return [{"intent": intent, "question": question} for intent, question in EXAMPLES.items()]
+
 
 HELP = (
     "I can answer questions about stock levels, inventory value, open purchase orders and "
@@ -49,6 +70,10 @@ def detect_intent(question: str) -> tuple[str, float]:
         if pattern.search(question or ""):
             return intent, 90.0
     return "unknown", 0.0
+
+
+# Every suggested question must route to its own intent.
+assert all(detect_intent(q)[0] == intent for intent, q in EXAMPLES.items()), "assistant example misroutes"
 
 
 async def ask(
@@ -217,9 +242,16 @@ async def _open_variances(session, company_id: str, godown_filter: str, params: 
     rows = (
         await session.execute(
             text(
-                "SELECT compare_doc_type, label, severity FROM document_variances "
-                "WHERE company_id = :c AND status IN ('open', 'disputed') "
-                "ORDER BY severity DESC LIMIT 100"
+                # The issue reads "price on MCB-32A: 90 → 99".
+                "SELECT dv.compare_doc_type, dv.severity, "
+                "dv.variance_type || COALESCE(' on ' || v.sku, '') || COALESCE(': ' || "
+                "  trim(trailing '.' FROM trim(trailing '0' FROM dv.base_value::text)) || ' → ' || "
+                "  trim(trailing '.' FROM trim(trailing '0' FROM dv.compare_value::text)), '') AS issue "
+                "FROM document_variances dv "
+                "LEFT JOIN product_variants v ON v.id = dv.product_variant_id AND v.company_id = dv.company_id "
+                "WHERE dv.company_id = :c AND dv.status IN ('open', 'disputed') "
+                "ORDER BY CASE dv.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, abs(COALESCE(dv.difference_pct, 0)) DESC "
+                "LIMIT 100"
             ),
             {"c": company_id},
         )
@@ -229,7 +261,7 @@ async def _open_variances(session, company_id: str, godown_filter: str, params: 
         "answer": f"{len(rows)} unresolved variance{'' if len(rows) == 1 else 's'} across your documents.",
         "table": {
             "columns": ["Document", "Issue", "Severity"],
-            "rows": [[(r["compare_doc_type"] or "").replace("_", " "), r["label"], r["severity"]] for r in rows],
+            "rows": [[(r["compare_doc_type"] or "").replace("_", " "), r["issue"], r["severity"]] for r in rows],
         },
         "link": {"label": "Review variances", "href": "/alerts"},
     }

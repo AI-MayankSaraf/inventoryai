@@ -17,6 +17,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.core import clock
 from app.modules.documents.schemas import VarianceOut as DocVarianceOut
 
 # ==================================================================== RFQ
@@ -97,6 +98,8 @@ class RfqOut(BaseModel):
     source_file_name: Optional[str] = None
     items: list[RfqItemOut] = Field(default_factory=list)
     suppliers: list[RfqSupplierOut] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class RfqSendRequest(BaseModel):
@@ -220,6 +223,7 @@ class PoCreate(BaseModel):
     rfq_id: Optional[UUID] = None
     freight_amount: float = Field(default=0, ge=0)
     other_charges: float = Field(default=0, ge=0)
+    notes: Optional[str] = None
     items: list[PoItemIn] = Field(default_factory=list)
 
 
@@ -230,6 +234,7 @@ class PoUpdate(BaseModel):
     delivery_godown_id: Optional[UUID] = None
     freight_amount: Optional[float] = Field(default=None, ge=0)
     other_charges: Optional[float] = Field(default=None, ge=0)
+    notes: Optional[str] = None
     items: Optional[list[PoItemIn]] = None
     row_version: int  # optimistic-lock token; required on every edit
 
@@ -265,10 +270,15 @@ class PoOut(BaseModel):
     approved_at: Optional[datetime]
     sent_at: Optional[datetime]
     cancelled_at: Optional[datetime]
+    cancelled_by: Optional[UUID] = None
+    cancelled_by_name: Optional[str] = None
     cancellation_reason: Optional[str]
+    notes: Optional[str] = None
     received_pct: float
     fully_received_at: Optional[datetime]
     row_version: int
+    created_at: datetime
+    updated_at: datetime
     items: list[PoItemOut] = Field(default_factory=list)
 
 
@@ -355,7 +365,7 @@ class GrnCreate(BaseModel):
     @model_validator(mode="after")
     def _date_not_future(self) -> "GrnCreate":
         # BR-GRN-13
-        if self.grn_date and self.grn_date > date.today():
+        if self.grn_date and clock.is_future_day(self.grn_date):
             raise ValueError("grn_date cannot be in the future")
         return self
 
@@ -379,9 +389,14 @@ class GrnOut(BaseModel):
     confirmed_by: Optional[UUID]
     confirmed_at: Optional[datetime]
     cancelled_at: Optional[datetime]
+    cancelled_by: Optional[UUID] = None
+    cancelled_by_name: Optional[str] = None
+    cancellation_reason: Optional[str] = None
     has_discrepancy: Optional[bool]
     remarks: Optional[str]
     row_version: int
+    created_at: datetime
+    updated_at: datetime
     items: list[GrnItemOut] = Field(default_factory=list)
     reversal: Optional["GrnReversalOut"] = None
 
@@ -415,7 +430,7 @@ class GrnUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _date_not_future(self) -> "GrnUpdate":
-        if self.grn_date and self.grn_date > date.today():
+        if self.grn_date and clock.is_future_day(self.grn_date):
             raise ValueError("grn_date cannot be in the future")
         return self
 
@@ -462,6 +477,13 @@ class GrnConfirmPoOut(BaseModel):
 class GrnReverseLine(BaseModel):
     goods_receipt_item_id: UUID
     quantity: float = Field(gt=0)
+
+
+class GrnCancelRequest(BaseModel):
+    """Why a draft receipt was cancelled. Optional so older clients that
+    post no body keep working."""
+
+    reason: Optional[str] = None
 
 
 class GrnReverseRequest(BaseModel):
@@ -581,6 +603,8 @@ class QuotationOut(BaseModel):
     # N+1 fan-out over every quotation on the list screen) but list rows
     # still need to show an item count — this is a cheap COUNT(*) instead.
     item_count: int = 0
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class QuotationRejectRequest(BaseModel):
@@ -649,6 +673,8 @@ class ComparisonOut(BaseModel):
     suppliers: list[ComparisonSupplierOut] = Field(default_factory=list)
     rows: list[ComparisonRowOut] = Field(default_factory=list)
     warnings: list[dict] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class ComparisonOverrideRequest(BaseModel):

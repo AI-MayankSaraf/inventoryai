@@ -188,6 +188,8 @@ interface RfqOut {
   source_file_name: string | null;
   items: RfqItemOut[];
   suppliers: RfqSupplierOut[];
+  created_at: string;
+  updated_at: string;
 }
 
 function toRfqItem(rfqId: Id, i: RfqItemOut): RfqItem {
@@ -234,7 +236,8 @@ function toRfq(r: RfqOut): Rfq {
     // No `created_at` timestamp on `RfqOut` — not read anywhere in the
     // current UI, so this is a safe simplification (same gap
     // catalog.api.ts documents for products/variants/godowns).
-    createdAt: "",
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
     rowVersion: r.row_version,
     externalSourceName: r.external_source_name,
     externalReferenceNumber: r.external_reference_number,
@@ -651,6 +654,8 @@ interface QuotationOut {
   items: QuotationItemOut[];
   is_expired: boolean;
   item_count: number;
+  created_at: string;
+  updated_at: string;
 }
 
 function toQuotationItem(quotationId: Id, i: QuotationItemOut): SupplierQuotationItem {
@@ -715,8 +720,8 @@ function toQuotation(q: QuotationOut): SupplierQuotation {
     approvedBy: q.approved_by,
     approvedAt: q.approved_at,
     rejectedReason: q.rejected_reason ?? undefined,
-    // No `created_at` on `QuotationOut` — same simplification as `toRfq`.
-    createdAt: "",
+    createdAt: q.created_at,
+    updatedAt: q.updated_at,
     rowVersion: q.row_version,
   };
 }
@@ -978,6 +983,8 @@ interface ComparisonOut {
   suppliers: ComparisonSupplierOut[];
   rows: ComparisonRowOut[];
   warnings: ComparisonWarningOut[];
+  created_at: string;
+  updated_at: string;
 }
 
 /** Build the human-readable message the mock used to bake into the row
@@ -1130,8 +1137,7 @@ async function assembleComparisonView(c: ComparisonOut): Promise<ComparisonView>
     projectedSavings,
     status: c.status as QuotationComparison["status"],
     notes: c.notes ?? undefined,
-    // No `created_at` on `ComparisonOut` — same simplification as `toRfq`.
-    createdAt: "",
+    createdAt: c.created_at,
   };
 
   const relevantQuotations = quotationsForRfq.filter((q) => quotationIds.has(q.id)).map(toQuotation);
@@ -1289,10 +1295,15 @@ interface PoOut {
   approved_at: string | null;
   sent_at: string | null;
   cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancelled_by_name: string | null;
   cancellation_reason: string | null;
+  notes: string | null;
   received_pct: number;
   fully_received_at: string | null;
   row_version: number;
+  created_at: string;
+  updated_at: string;
   items: PoItemOut[];
 }
 
@@ -1357,14 +1368,14 @@ function toPurchaseOrder(o: PoOut): PurchaseOrder {
     approvedAt: o.approved_at,
     sentAt: o.sent_at,
     cancelledAt: o.cancelled_at,
-    // No backend field for who cancelled it — known gap.
-    cancelledBy: null,
+    cancelledBy: o.cancelled_by,
+    cancelledByName: o.cancelled_by_name ?? undefined,
     cancellationReason: o.cancellation_reason ?? undefined,
     receivedPct: o.received_pct,
     fullyReceivedAt: o.fully_received_at,
-    // No backend field for free-text notes on a PO — known gap.
-    notes: undefined,
-    createdAt: "",
+    notes: o.notes ?? undefined,
+    createdAt: o.created_at,
+    updatedAt: o.updated_at,
     rowVersion: o.row_version,
   };
 }
@@ -1579,9 +1590,10 @@ export async function createPurchaseOrder(input: PurchaseOrderInput): Promise<Pu
     rfq_id: input.rfqId ?? undefined,
     freight_amount: input.freightAmount,
     other_charges: input.otherCharges,
-    // `quotationId`/`comparisonId`/`notes` have no field on `PoCreate`; a PO
-    // raised from a comparison goes through the comparison's own convert
-    // endpoint, which links them.
+    notes: input.notes?.trim() || undefined,
+    // `quotationId`/`comparisonId` have no field on `PoCreate`; a PO raised
+    // from a comparison goes through the comparison's own convert endpoint,
+    // which links them.
     items: input.lines.map((line) => {
       const variant = maps.variantsById.get(line.productVariantId);
       const product = variant ? maps.productsById.get(variant.product_id) : undefined;

@@ -26,7 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useSupplier } from "@/hooks/use-suppliers";
-import { formatCompactINR, formatCurrency, formatDate } from "@/lib/format";
+import { formatCompactINR, formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 
 export default function SupplierDetailPage({
   params,
@@ -122,6 +122,8 @@ export default function SupplierDetailPage({
                           }
                         />
                         <DetailRow label="Account No." value={supplier.bankAccountNo} mono />
+                        <DetailRow label="Created" value={supplier.createdAt ? formatDateTime(supplier.createdAt) : "—"} />
+                        <DetailRow label="Last Updated" value={supplier.updatedAt ? formatDateTime(supplier.updatedAt) : "—"} />
                       </DetailGrid>
                     </div>
                   </SectionCard>

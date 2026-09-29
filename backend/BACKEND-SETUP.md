@@ -65,7 +65,7 @@ PLATFORM_DATABASE_URL=postgresql+asyncpg://inventoryai_platform:inventoryai_plat
 alembic upgrade head
 ```
 
-Four migrations, in order:
+There are 20 migrations; the foundational four are below, and each later one opens with a docstring saying what it changes and why (`alembic history` lists them all):
 
 | Revision | What it does |
 |---|---|
@@ -74,22 +74,42 @@ Four migrations, in order:
 | `efc6b3fb9fdb` | Widens the `audit_logs` action/entity vocabularies so login failures, permission denials and master-data changes can actually be recorded |
 | `d613c7aa375a` | **Restores 73 foreign keys** that the initial migration declared but never created (Alembic silently drops `use_alter` constraints). Apply this — without it, most `created_by`/`uom_id` columns have no referential integrity |
 
-`alembic downgrade base` reverses all four cleanly.
+Every migration has a downgrade. The newest two (`a8c4e1f7d2b6` record timestamps, `c7e2a9f4b1d3` lists and plans) have been checked with a downgrade and re-upgrade on a seeded database.
 
 ## Seed baseline data
+
+The seed always writes the reference data every install needs — 9 UoMs, the permission catalogue, and the system roles with their grants (subscription plans come from migration `c7e2a9f4b1d3`). What else it creates is your choice. All of it is safe to re-run.
+
+### A real start (no demo data)
+
+```bash
+python -m app.db.seed --admin-email you@yourcompany.com --admin-name "Your Name"
+```
+
+Creates the platform admin — the account that runs the service. The password is read from `PLATFORM_ADMIN_PASSWORD` if set, otherwise asked for twice without echoing; it must have at least 8 characters, a letter and a digit. Nothing else is created: no company, no demo logins.
+
+Then sign in at `/login` with that account, open **System Admin → Onboard Company**, and create your company. Its Owner is sent an invitation and chooses their own password. Each new company starts with a Main Warehouse, its numbering series, and the default Settings → Lists (payment terms, delivery terms, supplier types), all editable.
+
+### Demo data (development only)
+
+```bash
+python -m app.db.seed --demo
+```
+
+Adds one demo tenant — **Acme Trading Co** — and a demo platform admin, with well-known passwords:
+
+```
+owner:           owner@acme-demo.test / Demo@12345
+platform admin:  platform-admin@inventoryai.test / Platform@12345
+```
+
+The test suites in `tests/` use these accounts. Never run `--demo` on a database other people can reach — anyone who has read this file can sign in.
+
+### Reference data only
 
 ```bash
 python -m app.db.seed
 ```
-
-Seeds 9 UoMs, the 96-code permission catalogue, the 7 system roles with their grants, and one demo tenant — **Acme Trading Co**, with a working Owner login:
-
-```
-email:    owner@acme-demo.test
-password: Demo@12345
-```
-
-The global reference data is idempotent. The demo company is not — re-running creates a second one.
 
 ## Run
 

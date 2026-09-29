@@ -39,7 +39,7 @@ import {
 import { useCompanySettings } from "@/hooks/use-admin";
 import { usePurchaseOrder, useSetPurchaseOrderStatus } from "@/hooks/use-procurement";
 import { usePermissions } from "@/hooks/use-session";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Id, PurchaseOrderStatus } from "@/types";
 
@@ -201,6 +201,21 @@ export function PoDetailScreen({ id }: { id: Id }) {
                     label="Tax Treatment"
                     value={po.isInterState ? "IGST (inter-state)" : "CGST + SGST (intra-state)"}
                   />
+                  <DetailRow label="Created" value={formatDateTime(po.createdAt)} />
+                  <DetailRow label="Last Updated" value={formatDateTime(po.updatedAt)} />
+                  {po.status === "cancelled" && (
+                    <DetailRow
+                      label="Cancelled"
+                      value={[
+                        po.cancelledAt ? formatDateTime(po.cancelledAt) : null,
+                        po.cancelledByName ? `by ${po.cancelledByName}` : null,
+                      ].filter(Boolean).join(" ") || "—"}
+                    />
+                  )}
+                  {po.status === "cancelled" && po.cancellationReason && (
+                    <DetailRow label="Cancellation Reason" value={po.cancellationReason} />
+                  )}
+                  {po.notes && <DetailRow label="Notes" value={po.notes} />}
                 </DetailGrid>
               </SectionCard>
 

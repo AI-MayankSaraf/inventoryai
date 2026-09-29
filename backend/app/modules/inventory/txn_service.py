@@ -23,6 +23,7 @@ from fastapi import Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core import audit, inventory as ledger, numbering
 from app.core.db import set_tenant
 from app.core.deps import assert_godown_in_scope
@@ -202,13 +203,12 @@ async def create_transaction(
             "This variant is inactive; reactivate it before posting stock against it",
         )
 
-    txn_date = body.txn_date or datetime.now(timezone.utc)
-    if txn_date.tzinfo is None:
-        txn_date = txn_date.replace(tzinfo=timezone.utc)
-    # BR-INV-10, first half: a movement cannot be dated in the future. The
-    # second half (the period-close marker) needs the tenant's settings and
-    # lives in the ledger module.
-    if txn_date > datetime.now(timezone.utc):
+    # A naive value (a date-only field) is Indian time, not UTC midnight.
+    txn_date = clock.as_business_time(body.txn_date) if body.txn_date else datetime.now(timezone.utc)
+    # BR-INV-10, first half: a movement cannot be dated in the future — by
+    # the day in India. The second half (the period-close marker) needs the
+    # tenant's settings and lives in the ledger module.
+    if clock.is_future_day(txn_date):
         raise ApiError(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             CODE_BUSINESS_RULE_VIOLATION,

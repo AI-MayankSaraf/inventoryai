@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Eye, MoreHorizontal, PackagePlus, Pencil } from "lucide-react";
+import { Eye, MoreHorizontal, Package, PackagePlus, Pencil } from "lucide-react";
 
 import { OwnerOnlyGate } from "@/components/common/permission-gate";
 import { StatusBadge } from "@/components/common/status-badge";
@@ -64,8 +64,8 @@ export function ProductTable({
             <TableRow key={product.id}>
               <TableCell className="pl-4">
                 <Link href={`/products/${product.id}`} className="group flex items-center gap-3">
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted text-[17px]">
-                    {product.displayEmoji ?? "📦"}
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground">
+                    <Package className="size-4" />
                   </span>
                   <span className="min-w-0">
                     <span className="block max-w-[230px] truncate font-medium text-foreground group-hover:text-primary">

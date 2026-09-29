@@ -42,6 +42,7 @@ from app.models.base import (
     RowVersionMixin,
     Score,
     TenantMixin,
+    TimestampMixin,
     UUIDPkMixin,
     VariancePct,
     enum_check,
@@ -53,7 +54,7 @@ from app.models.base import (
 # ============================================================== 6.2-6.7 RFQ
 
 
-class Rfq(UUIDPkMixin, TenantMixin, RowVersionMixin, Base):
+class Rfq(UUIDPkMixin, TenantMixin, RowVersionMixin, TimestampMixin, Base):
     __tablename__ = "rfqs"
 
     rfq_number: Mapped[str] = mapped_column(Text, nullable=False)
@@ -134,7 +135,7 @@ class RfqSupplier(UUIDPkMixin, TenantMixin, Base):
     )
 
 
-class SupplierQuotation(UUIDPkMixin, TenantMixin, RowVersionMixin, Base):
+class SupplierQuotation(UUIDPkMixin, TenantMixin, RowVersionMixin, TimestampMixin, Base):
     __tablename__ = "supplier_quotations"
 
     quotation_number: Mapped[str] = mapped_column(Text, nullable=False)
@@ -222,7 +223,7 @@ class SupplierQuotationItem(UUIDPkMixin, TenantMixin, Base):
     )
 
 
-class QuotationComparison(UUIDPkMixin, TenantMixin, Base):
+class QuotationComparison(UUIDPkMixin, TenantMixin, TimestampMixin, Base):
     """(RECOMMENDED) The sourcing decision — today lost in `sessionStorage`
     (§6.7)."""
 
@@ -284,7 +285,7 @@ class QuotationComparisonLine(UUIDPkMixin, TenantMixin, Base):
 # =========================================================== 6.8-6.9 PO
 
 
-class PurchaseOrder(UUIDPkMixin, TenantMixin, RowVersionMixin, Base):
+class PurchaseOrder(UUIDPkMixin, TenantMixin, RowVersionMixin, TimestampMixin, Base):
     __tablename__ = "purchase_orders"
 
     po_number: Mapped[str] = mapped_column(Text, nullable=False)
@@ -320,6 +321,7 @@ class PurchaseOrder(UUIDPkMixin, TenantMixin, RowVersionMixin, Base):
     cancelled_at: Mapped[Optional[datetime]] = mapped_column()
     cancelled_by: Mapped[Optional[uuid.UUID]] = plain_fk("users.id", ondelete="SET NULL")
     cancellation_reason: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
     received_pct: Mapped[float] = mapped_column(Pct, nullable=False, server_default=text("0"))
     fully_received_at: Mapped[Optional[datetime]] = mapped_column()
 
@@ -496,7 +498,7 @@ class ProformaInvoiceItem(UUIDPkMixin, TenantMixin, Base):
 # ======================================================= 6.11-6.12 GRN
 
 
-class GoodsReceipt(UUIDPkMixin, TenantMixin, RowVersionMixin, Base):
+class GoodsReceipt(UUIDPkMixin, TenantMixin, RowVersionMixin, TimestampMixin, Base):
     __tablename__ = "goods_receipts"
 
     grn_number: Mapped[str] = mapped_column(Text, nullable=False)

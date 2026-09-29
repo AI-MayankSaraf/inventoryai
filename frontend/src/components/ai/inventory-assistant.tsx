@@ -14,22 +14,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useAssistant } from "@/hooks/use-documents";
+import { useAssistant, useAssistantSuggestions } from "@/hooks/use-documents";
 import { cn } from "@/lib/utils";
 import type { AssistantAnswer } from "@/types";
-
-/**
- * The questions the assistant can actually answer. These map to the intents
- * implemented in `documents.api.ts` — offering a chip the service cannot
- * handle would be a promise the app does not keep.
- */
-const SUGGESTED_QUESTIONS = [
-  "What is out of stock?",
-  "What is low on stock?",
-  "What is my inventory worth?",
-  "Which purchase orders are still pending?",
-  "Are there any unresolved variances?",
-];
 
 interface Turn {
   id: string;
@@ -44,6 +31,9 @@ export function InventoryAssistant() {
   const [draft, setDraft] = React.useState("");
   const endRef = React.useRef<HTMLDivElement>(null);
   const assistant = useAssistant();
+  // One example per kind of question the backend answers, served by it —
+  // so a chip can never offer a question the service cannot handle.
+  const suggestions = useAssistantSuggestions().data ?? [];
   const thinking = assistant.isPending;
 
   React.useEffect(() => {
@@ -252,7 +242,7 @@ export function InventoryAssistant() {
           </form>
 
           <div className="mt-2.5 flex flex-wrap gap-1.5">
-            {SUGGESTED_QUESTIONS.map((question) => (
+            {suggestions.map((question) => (
               <button
                 key={question}
                 type="button"

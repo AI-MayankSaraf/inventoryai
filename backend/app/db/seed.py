@@ -416,6 +416,10 @@ async def seed_demo_company(
         {"c": company_id, "g": godown_id},
     )
 
+    from app.core import company_lists
+
+    await company_lists.seed_defaults(conn, company_id)
+
     from app.core.security import hash_password
 
     owner_user_id = (
@@ -483,25 +487,96 @@ async def seed_platform_admin(
     return {"user_id": user_id, "created": True}
 
 
-async def run() -> None:
-    # Must run as the BYPASSRLS platform role: global reference data inserts
-    # system-wide (NULL company_id) rows that the ordinary app role's own
-    # RLS policies deliberately forbid it from creating (see
-    # alembic/versions/..._rls_policies.py), and creating a company row at
-    # all requires bypassing the companies policy's own WITH CHECK (which
-    # compares to the tenant already in session context — there is no
-    # tenant context yet for a row that doesn't exist).
+async def run(
+    *,
+    demo: bool = False,
+    admin_email: Optional[str] = None,
+    admin_name: str = "Platform Admin",
+    admin_password: Optional[str] = None,
+) -> None:
+    """Reference data always; then a real platform admin, the demo data, or
+    both. Reference data is idempotent, so re-running is safe.
+
+    Must run as the BYPASSRLS platform role: global reference data inserts
+    system-wide (NULL company_id) rows that the ordinary app role's own RLS
+    policies deliberately forbid it from creating (see
+    alembic/versions/..._rls_policies.py), and creating a company row at all
+    requires bypassing the companies policy's own WITH CHECK (which compares
+    to the tenant already in session context — there is no tenant context
+    yet for a row that doesn't exist)."""
     from app.core.db import platform_engine
 
     async with platform_engine.begin() as conn:
         await seed_global_reference_data(conn)
-        result = await seed_demo_company(conn)
-        admin = await seed_platform_admin(conn)
-        print("Seeded global reference data + demo company:", result)
-        print("Platform admin:", admin)
+        print("Reference data: units, permissions and system roles are in place.")
+
+        if admin_email:
+            admin = await seed_platform_admin(conn, email=admin_email, password=admin_password or "")
+            if admin["created"]:
+                await conn.execute(text("UPDATE users SET full_name = :n WHERE id = :id"),
+                                   {"n": admin_name, "id": admin["user_id"]})
+                print(f"Platform admin created: {admin_email}")
+            else:
+                print(f"Platform admin {admin_email} already exists; left unchanged.")
+
+        if demo:
+            exists = (
+                await conn.execute(text("SELECT 1 FROM users WHERE lower(email) = 'owner@acme-demo.test'"))
+            ).scalar()
+            if exists:
+                print("Demo company already present; not creating a second one.")
+            else:
+                result = await seed_demo_company(conn)
+                admin = await seed_platform_admin(conn)
+                print("Demo company created:", result)
+                print("Demo platform admin:", admin)
+
+
+def _main() -> None:
+    """
+    python -m app.db.seed --admin-email you@company.com [--admin-name "Your Name"]
+        A real start: reference data and a platform admin. The password
+        comes from PLATFORM_ADMIN_PASSWORD, or is asked for (not echoed).
+        Then sign in and onboard your company from the platform console.
+
+    python -m app.db.seed --demo
+        Reference data plus the demo company (owner@acme-demo.test) and
+        demo platform admin, with their well-known passwords. Development
+        only.
+
+    python -m app.db.seed
+        Reference data only.
+    """
+    import argparse
+    import asyncio
+    import getpass
+    import os
+    import sys
+
+    parser = argparse.ArgumentParser(prog="python -m app.db.seed", description=_main.__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--admin-email", help="create the platform admin with this email")
+    parser.add_argument("--admin-name", default="Platform Admin", help="their name (default: Platform Admin)")
+    parser.add_argument("--demo", action="store_true", help="also create the demo company (development only)")
+    args = parser.parse_args()
+
+    password = None
+    if args.admin_email:
+        password = os.environ.get("PLATFORM_ADMIN_PASSWORD")
+        if not password:
+            password = getpass.getpass(f"Password for {args.admin_email}: ")
+            if password != getpass.getpass("Again: "):
+                sys.exit("The passwords don't match.")
+        from app.core.errors import ApiError
+        from app.core.security import validate_password_strength
+
+        try:
+            validate_password_strength(password)
+        except ApiError as exc:
+            sys.exit(f"Password too weak: {exc.detail}")
+
+    asyncio.run(run(demo=args.demo, admin_email=args.admin_email, admin_name=args.admin_name, admin_password=password))
 
 
 if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(run())
+    _main()

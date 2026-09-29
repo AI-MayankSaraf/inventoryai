@@ -13,7 +13,6 @@ phase transitions into it — GRNs confirm directly against `sent`.
 
 from __future__ import annotations
 
-from datetime import date
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID, uuid4
@@ -22,6 +21,7 @@ from fastapi import Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core import audit
 from app.core.deps import assert_godown_in_scope
 from app.core.errors import (
@@ -53,7 +53,9 @@ async def _load(session: AsyncSession, *, company_id: str, po_id: UUID) -> dict:
                 "place_of_supply_state_code, is_inter_state, currency_code, subtotal, discount_amount, "
                 "taxable_value, cgst_amount, sgst_amount, igst_amount, cess_amount, freight_amount, "
                 "other_charges, round_off, total_amount, status, approved_by, approved_at, sent_at, "
-                "cancelled_at, cancellation_reason, received_pct, fully_received_at, row_version "
+                "cancelled_at, cancelled_by, cancellation_reason, notes, received_pct, fully_received_at, row_version, "
+                "created_at, updated_at, "
+                "(SELECT u.full_name FROM users u WHERE u.id = purchase_orders.cancelled_by) AS cancelled_by_name "
                 "FROM purchase_orders WHERE id = :id AND company_id = :c"
             ),
             {"id": po_id, "c": company_id},
@@ -100,7 +102,9 @@ async def list_pos(
                 "place_of_supply_state_code, is_inter_state, currency_code, subtotal, discount_amount, "
                 "taxable_value, cgst_amount, sgst_amount, igst_amount, cess_amount, freight_amount, "
                 "other_charges, round_off, total_amount, status, approved_by, approved_at, sent_at, "
-                "cancelled_at, cancellation_reason, received_pct, fully_received_at, row_version "
+                "cancelled_at, cancelled_by, cancellation_reason, notes, received_pct, fully_received_at, row_version, "
+                "created_at, updated_at, "
+                "(SELECT u.full_name FROM users u WHERE u.id = purchase_orders.cancelled_by) AS cancelled_by_name "
                 f"FROM purchase_orders WHERE {' AND '.join(where)} "
                 "ORDER BY po_date DESC, po_number DESC LIMIT :limit OFFSET :offset"
             ),
@@ -287,7 +291,7 @@ async def create_po(
     rounding_mode = (settings or {}).get("rounding_mode", "nearest")
 
     po_id = uuid4()
-    po_date = body.po_date or date.today()
+    po_date = body.po_date or clock.today()
     po_number = await allocate(session, company_id=UUID(claims.company_id), doc_type="po", on=po_date)
     inter_state = is_inter_state(supplier["state_code"], godown["state_code"])
 
@@ -299,9 +303,9 @@ async def create_po(
         text(
             "INSERT INTO purchase_orders "
             "(id, company_id, po_number, supplier_id, rfq_id, po_date, expected_delivery_date, delivery_godown_id, "
-            " payment_terms, delivery_terms, place_of_supply_state_code, is_inter_state) "
+            " payment_terms, delivery_terms, place_of_supply_state_code, is_inter_state, notes) "
             "VALUES (:id, :c, :number, :supplier, :rfq_id, :po_date, :expected, :godown, :payment_terms, "
-            " :delivery_terms, :state, :inter_state)"
+            " :delivery_terms, :state, :inter_state, :notes)"
         ),
         {
             "id": po_id,
@@ -316,6 +320,7 @@ async def create_po(
             "delivery_terms": body.delivery_terms,
             "state": godown["state_code"],
             "inter_state": inter_state,
+            "notes": body.notes,
         },
     )
 

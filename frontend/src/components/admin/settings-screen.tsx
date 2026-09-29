@@ -5,6 +5,7 @@ import { Lock } from "lucide-react";
 
 import { AsyncBoundary, FormError, LoadingCard } from "@/components/common/async-state";
 import { ChangePasswordCard } from "@/components/admin/change-password-card";
+import { CompanyListsCard } from "@/components/admin/company-lists-card";
 import { EmailSettingsCard } from "@/components/admin/email-settings-card";
 import { EmbeddingIndexCard } from "@/components/admin/embedding-index-card";
 import { PageHeader } from "@/components/common/page-header";
@@ -32,6 +33,7 @@ import {
 } from "@/hooks/use-admin";
 import { usePermission } from "@/hooks/use-session";
 import { formatDate } from "@/lib/format";
+import { INDIAN_STATES } from "@/lib/gst-states";
 import type { Company, CompanySettings, DocSequenceType } from "@/types";
 
 /**
@@ -40,21 +42,6 @@ import type { Company, CompanySettings, DocSequenceType } from "@/types";
  * same API every other mutation goes through — nothing on this screen is a
  * constant baked into a component (I14, I15).
  */
-
-const INDIAN_STATES: { code: string; name: string }[] = [
-  { code: "01", name: "Jammu and Kashmir" }, { code: "02", name: "Himachal Pradesh" },
-  { code: "03", name: "Punjab" }, { code: "04", name: "Chandigarh" },
-  { code: "05", name: "Uttarakhand" }, { code: "06", name: "Haryana" },
-  { code: "07", name: "Delhi" }, { code: "08", name: "Rajasthan" },
-  { code: "09", name: "Uttar Pradesh" }, { code: "10", name: "Bihar" },
-  { code: "19", name: "West Bengal" }, { code: "20", name: "Jharkhand" },
-  { code: "21", name: "Odisha" }, { code: "22", name: "Chhattisgarh" },
-  { code: "23", name: "Madhya Pradesh" }, { code: "24", name: "Gujarat" },
-  { code: "27", name: "Maharashtra" }, { code: "29", name: "Karnataka" },
-  { code: "30", name: "Goa" }, { code: "32", name: "Kerala" },
-  { code: "33", name: "Tamil Nadu" }, { code: "34", name: "Puducherry" },
-  { code: "36", name: "Telangana" }, { code: "37", name: "Andhra Pradesh" },
-];
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -244,6 +231,13 @@ export function SettingsScreen() {
                     <div className="px-4 pb-4">
                       <FormError message={saveProfile.error} fieldErrors={saveProfile.fieldErrors} />
                     </div>
+                  )}
+                  {settingsState.data && (
+                    <p className="border-t px-4 py-3 text-caption text-muted-foreground">
+                      {settingsState.data.company.plan} plan
+                      {settingsState.data.company.ownerEmail && <> · Owner {settingsState.data.company.ownerEmail}</>}
+                      {" "}· Customer since {formatDate(settingsState.data.company.onboardedOn)}
+                    </p>
                   )}
                 </SectionCard>
 
@@ -468,6 +462,8 @@ export function SettingsScreen() {
                     </li>
                   </ul>
                 </SectionCard>
+
+                <CompanyListsCard />
 
                 <EmbeddingIndexCard />
 

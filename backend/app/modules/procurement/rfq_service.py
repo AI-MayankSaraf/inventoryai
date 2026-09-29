@@ -14,7 +14,6 @@ half-built.
 
 from __future__ import annotations
 
-from datetime import date
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -22,6 +21,7 @@ from fastapi import Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core import audit
 from app.core.deps import assert_godown_in_scope
 from app.core.errors import (
@@ -41,7 +41,7 @@ from app.modules.procurement.schemas import RfqCancelRequest, RfqCreate, RfqSend
 _RFQ_HEADER_COLUMNS = (
     "id, rfq_number, rfq_date, expected_delivery_date, subject, delivery_godown_id, "
     "notes, status, sent_at, closed_at, estimated_value, created_from, row_version, "
-    "external_source_name, external_reference_number, source_file_name"
+    "external_source_name, external_reference_number, source_file_name, created_at, updated_at"
 )
 
 
@@ -162,7 +162,7 @@ async def create_rfq(
         assert_godown_in_scope(claims, body.delivery_godown_id)
 
     rfq_id = uuid4()
-    rfq_date = body.rfq_date or date.today()
+    rfq_date = body.rfq_date or clock.today()
     rfq_number = await allocate(session, company_id=UUID(claims.company_id), doc_type="rfq", on=rfq_date)
 
     await session.execute(
@@ -474,7 +474,7 @@ async def import_rfq(
         raise ApiError(status.HTTP_422_UNPROCESSABLE_ENTITY, CODE_NO_ITEMS, "No items found in the file")
 
     rfq_id = uuid4()
-    rfq_date = date.today()
+    rfq_date = clock.today()
     rfq_number = await allocate(session, company_id=UUID(claims.company_id), doc_type="rfq", on=rfq_date)
     source_name = external_source_name.strip()
 

@@ -31,8 +31,11 @@ from app.core.db import get_platform_session
 from app.core.deps import require_platform_admin
 from app.core.errors import CODE_FORBIDDEN, ApiError
 from app.core.security import AccessTokenClaims
-from app.modules.platform import console_service
+from app.modules.platform import console_service, plans_service
 from app.modules.platform.schemas import (
+    SubscriptionPlanCreate,
+    SubscriptionPlanOut,
+    SubscriptionPlanUpdate,
     CompanyAdminUpdate,
     CompanyOnboardRequest,
     CompanyOnboardedOut,
@@ -76,7 +79,7 @@ async def platform_kpis(
 async def list_companies(
     q: Optional[str] = Query(default=None, max_length=200),
     status_filter: Optional[str] = Query(default=None, alias="status", pattern="^(active|suspended)$"),
-    plan: Optional[str] = Query(default=None, pattern="^(Trial|Starter|Growth|Enterprise)$"),
+    plan: Optional[str] = Query(default=None, max_length=100),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     claims: AccessTokenClaims = Depends(require_platform_admin),
@@ -367,3 +370,59 @@ async def platform_activity(
 ) -> list[dict]:
     _not_impersonating(claims)
     return await console_service.activity(session, limit=limit, company_id=company_id)
+
+
+# ================================================================ plans
+
+
+@router.get("/plans", response_model=list[SubscriptionPlanOut])
+async def list_plans(
+    active_only: bool = Query(default=False),
+    claims: AccessTokenClaims = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_platform_session),
+) -> list[dict]:
+    return await plans_service.list_plans(session, active_only=active_only)
+
+
+@router.post("/plans", response_model=SubscriptionPlanOut, status_code=status.HTTP_201_CREATED)
+async def create_plan(
+    body: SubscriptionPlanCreate,
+    request: Request,
+    claims: AccessTokenClaims = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_platform_session),
+) -> dict:
+    _not_impersonating(claims)
+    plan = await plans_service.create_plan(
+        session, claims=claims, name=body.name, description=body.description, sort_order=body.sort_order,
+        request=request,
+    )
+    await session.commit()
+    return plan
+
+
+@router.patch("/plans/{plan_id}", response_model=SubscriptionPlanOut)
+async def update_plan(
+    plan_id: UUID,
+    body: SubscriptionPlanUpdate,
+    request: Request,
+    claims: AccessTokenClaims = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_platform_session),
+) -> dict:
+    _not_impersonating(claims)
+    plan = await plans_service.update_plan(
+        session, claims=claims, plan_id=plan_id, values=body.model_dump(exclude_unset=True), request=request
+    )
+    await session.commit()
+    return plan
+
+
+@router.delete("/plans/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_plan(
+    plan_id: UUID,
+    request: Request,
+    claims: AccessTokenClaims = Depends(require_platform_admin),
+    session: AsyncSession = Depends(get_platform_session),
+) -> None:
+    _not_impersonating(claims)
+    await plans_service.delete_plan(session, claims=claims, plan_id=plan_id, request=request)
+    await session.commit()

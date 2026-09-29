@@ -28,6 +28,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock, company_lists
+from app.modules.platform import plans_service
 from app.core import audit
 from app.core.deps import revoke_sessions
 from app.core.errors import CODE_DUPLICATE, CODE_FORBIDDEN, CODE_NOT_FOUND, CODE_VALIDATION, ApiError
@@ -174,6 +176,8 @@ async def onboard_company(
             errors=[{"field": "owner_email", "message": "Belongs to a platform admin or an inactive account"}],
         )
 
+    await plans_service.assert_assignable(session, body.plan)
+
     company_id = uuid4()
     try:
         await session.execute(
@@ -222,6 +226,7 @@ async def onboard_company(
         text("INSERT INTO company_settings (company_id, default_godown_id) VALUES (:c, :g)"),
         {"c": company_id, "g": godown_id},
     )
+    await company_lists.seed_defaults(session, company_id)
 
     fy = _financial_year()
     for doc_type in DOC_TYPES:
@@ -428,6 +433,8 @@ async def update_company(
         return before
     if "name" in fields and not (fields["name"] or "").strip():
         raise ApiError(status.HTTP_422_UNPROCESSABLE_ENTITY, CODE_VALIDATION, "A company needs a name")
+    if "plan" in fields:
+        await plans_service.assert_assignable(session, fields["plan"], current=before["plan"])
 
     assignments = ", ".join(f"{k} = :{k}" for k in fields)
     try:
@@ -1040,4 +1047,4 @@ async def activity(session: AsyncSession, *, limit: int = 100, company_id: Optio
 
 
 def today() -> date:
-    return date.today()
+    return clock.today()
