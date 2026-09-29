@@ -11,22 +11,14 @@
  * row that points at what it reverses — never by editing or deleting history
  * (BR-INV-03).
  *
- * Every screen-facing function below calls the real `/inventory/*` API, and
- * **nothing in this app writes to the mock ledger any more.** The mock
- * writer that used to live here went when purchase returns and opening
- * stock started posting server-side — those were its last two callers.
- *
- * Nothing here reads mock data either. The two helpers that used to —
- * `assertPeriodOpen` and `reorderPointFor` — are gone: the period lock now
- * comes from `/company/settings` where the receipt form needs it, and
- * per-godown reorder levels are served by
- * `/catalog/variants/{id}/godown-policies`.
+ * Every function below calls the real `/inventory/*` API; the ledger is
+ * written only by the backend. The period lock comes from
+ * `/company/settings` where the receipt form needs it, and per-godown
+ * reorder levels from `/catalog/variants/{id}/godown-policies`.
  */
 
 import { round2, round3 } from "@/lib/domain/money";
-// `query` is the shared client-side list filter/sort helper — it reads
-// nothing from the mock repository.
-import { query } from "@/mock/repository";
+import { query } from "./list-query";
 import type {
   Batch,
   CreateTransactionInput,

@@ -15,7 +15,7 @@ import { useAuditLogs } from "@/hooks/use-ops";
 /**
  * "Who did what, when" across the whole company.
  *
- * Every mutating API call writes an entry here (`recordAudit`), so this list
+ * The backend writes an entry for every change it makes, so this list
  * is the record itself, not a summary of one — the same trail a detail
  * screen's audit panel reads from, just company-wide and filterable.
  */
@@ -33,7 +33,7 @@ export function AuditLogScreen() {
   // A large, unfiltered read purely to build the filter option lists from
   // real recorded values — never a hardcoded list of actions or entity types.
   const optionsState = useAuditLogs({ limit: 1000 });
-  const optionRows = optionsState.data?.items ?? [];
+  const optionRows = React.useMemo(() => optionsState.data?.items ?? [], [optionsState.data]);
 
   const actionOptions = React.useMemo(() => {
     const map: Record<string, string> = {};

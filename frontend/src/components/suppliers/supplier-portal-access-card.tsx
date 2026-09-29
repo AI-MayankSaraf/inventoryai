@@ -40,7 +40,7 @@ import type { SupplierPortalAccess } from "@/types/supplier-portal";
  * link" is also how they get back in after forgetting their password.
  */
 export function SupplierPortalAccessCard({ supplierId, contacts }: { supplierId: Id; contacts: SupplierContact[] }) {
-  const list = useApiQuery(["portal-access", supplierId], () => listPortalAccess(supplierId), { live: false });
+  const list = useApiQuery(["portal-access", supplierId], () => listPortalAccess(supplierId));
   const [open, setOpen] = React.useState(false);
   const [notice, setNotice] = React.useState<string | null>(null);
 

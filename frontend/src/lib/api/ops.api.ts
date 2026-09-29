@@ -9,9 +9,7 @@
  * about, so "5 items low" is always openable rather than decorative (I13).
  */
 
-// `query` is a pure list helper (search / sort / page over an array). It reads
-// nothing from the mock — every row on this path comes from the API.
-import { query } from "@/mock/repository";
+import { query } from "./list-query";
 import type {
   ActivityItem,
   Alert,

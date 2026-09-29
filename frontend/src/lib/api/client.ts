@@ -1,19 +1,14 @@
 /**
- * The API client shim.
+ * The HTTP client for the FastAPI backend.
  *
- * Every screen in this app talks to `src/lib/api/*`. Those modules are written
- * as if they were HTTP calls: they are async, they can fail, they return the
- * shapes in `04_API_SPECIFICATION.md`, and they never expose the mock database
- * to the caller. Today `request()` runs a function against the in-memory
- * database; when the backend exists it becomes `fetch`, and nothing above this
- * file changes.
- *
- * Errors are thrown as `ApiError`, the way a real client would surface a
- * non-2xx response. Business-rule failures carry the rule id from
- * `06_BUSINESS_RULES.md` so the UI can explain *why* rather than just "failed".
+ * Every screen talks to `src/lib/api/*`, and those modules call the backend
+ * through the `http*` helpers below. Failures surface as `ApiError`: a non-2xx
+ * response's RFC 9457 `problem+json` body is parsed into it, and the checks a
+ * module runs before sending (`validationFailed`, `reject`, `notFound`) throw
+ * the same shape, so a screen handles both the same way. Business-rule
+ * failures carry the rule id from `06_BUSINESS_RULES.md` so the UI can
+ * explain *why* rather than just "failed".
  */
-
-import type { ApiResult, ListParams } from "@/types";
 
 export class ApiError extends Error {
   readonly code: string;
@@ -36,53 +31,6 @@ export function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError;
 }
 
-/** Latency so loading states are exercised rather than skipped. */
-const READ_LATENCY_MS = 90;
-const WRITE_LATENCY_MS = 260;
-
-const shouldDelay = typeof window !== "undefined" && process.env.NODE_ENV !== "test";
-
-function sleep(ms: number): Promise<void> {
-  if (!shouldDelay || ms <= 0) return Promise.resolve();
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** A read. Fast, and never mutates. */
-export async function get<T>(fn: () => T): Promise<T> {
-  await sleep(READ_LATENCY_MS);
-  return fn();
-}
-
-/** A write. Slower, and may reject with an `ApiError`. */
-export async function send<T>(fn: () => T): Promise<T> {
-  await sleep(WRITE_LATENCY_MS);
-  return fn();
-}
-
-/** Build the `ApiResult` envelope the real endpoints return. */
-export function ok<T>(data: T): ApiResult<T> {
-  return { ok: true, data };
-}
-
-export function fail(
-  error: string,
-  code?: string,
-  fieldErrors?: { field: string; message: string }[],
-): ApiResult<never> {
-  return { ok: false, error, code, fieldErrors };
-}
-
-/** Unwrap an envelope, throwing the way a fetch client would. */
-export function unwrap<T>(result: ApiResult<T>): T {
-  if (!result.ok || result.data === undefined) {
-    throw new ApiError(result.error ?? "Request failed", {
-      code: result.code,
-      fieldErrors: result.fieldErrors,
-    });
-  }
-  return result.data;
-}
-
 /** Throw a business-rule failure. `code` is the rule id, e.g. `BR-GRN-06`. */
 export function reject(message: string, code: string, status = 422): never {
   throw new ApiError(message, { code, status });
@@ -90,15 +38,6 @@ export function reject(message: string, code: string, status = 422): never {
 
 export function notFound(what: string): never {
   throw new ApiError(`${what} not found`, { code: "NOT_FOUND", status: 404 });
-}
-
-export function invalidTransition(from: string, to: string, allowed: string[]): never {
-  throw new ApiError(
-    allowed.length
-      ? `Cannot go from ${from} to ${to}. Allowed: ${allowed.join(", ")}.`
-      : `${from} is a final state — no further changes are possible.`,
-    { code: "INVALID_STATE_TRANSITION", status: 409 },
-  );
 }
 
 export function validationFailed(fieldErrors: { field: string; message: string }[]): never {
@@ -109,19 +48,6 @@ export function validationFailed(fieldErrors: { field: string; message: string }
   });
 }
 
-/** Normalise a list query so every endpoint treats params the same way. */
-export function listParams(params: ListParams = {}): ListParams {
-  return {
-    q: params.q?.trim() || undefined,
-    filters: params.filters,
-    sort: params.sort,
-    limit: params.limit,
-    cursor: params.cursor ?? null,
-    dateFrom: params.dateFrom,
-    dateTo: params.dateTo,
-  };
-}
-
 /** Human-readable message for any thrown value. */
 export function errorMessage(error: unknown, fallback = "Something went wrong."): string {
   if (isApiError(error)) return error.message;
@@ -129,22 +55,7 @@ export function errorMessage(error: unknown, fallback = "Something went wrong.")
   return fallback;
 }
 
-/* ======================================================================
- * Real HTTP — the backend wiring.
- *
- * Everything above this line is the mock-database shim the frontend
- * correction phase built (`get`/`send`/`reject`/`notFound`/...), and it is
- * still what `inventory.api.ts`, `documents.api.ts`, `invoices.api.ts` and
- * `ops.api.ts` use — those areas have no backend yet (AI matching, alerts,
- * reports, supplier invoices, purchase returns), so they deliberately stay
- * on the mock. `ApiError` and `errorMessage` above are shared by both
- * worlds so a screen never needs to know which one it's talking to.
- *
- * Everything below is for the areas that *do* have a real FastAPI backend
- * now: auth, catalog masters, company/users, and RFQ → PO → GRN. It talks
- * real fetch to that backend and parses its RFC 9457 `problem+json` error
- * envelope into the same `ApiError` shape above.
- * ==================================================================== */
+/* ------------------------------------------------------------ HTTP */
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
 
@@ -263,9 +174,9 @@ async function performFetch(url: string, method: string, body: unknown, token: s
   });
 }
 
-/** The real HTTP call. Throws `ApiError` on any non-2xx response, exactly
- * the way the mock's `reject`/`notFound`/`validationFailed` do, so a screen
- * that catches `ApiError` cannot tell which backend it was talking to. */
+/** The HTTP call. Throws `ApiError` on any non-2xx response — the same error
+ * `reject`/`notFound`/`validationFailed` throw for checks made before
+ * sending, so a screen handles both the same way. */
 async function http<T>(path: string, options: HttpOptions = {}): Promise<T> {
   const { method = "GET", body, query, auth = true } = options;
   const url = buildUrl(path, query);

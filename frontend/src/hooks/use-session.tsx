@@ -134,7 +134,6 @@ export function useMyCompanies() {
   const enabled = !!user && !user.isPlatformAdmin && !impersonation;
   return useApiQuery(["my-companies", user?.id, user?.companyId], () => authApi.listMyCompanies(), {
     enabled,
-    live: false,
   });
 }
 

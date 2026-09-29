@@ -63,13 +63,14 @@ export function AlertsScreen() {
   const summary = useAlertSummary();
 
   // Every mutation here changes both the feed and the counts above it, and
-  // neither refreshes on its own now that these are real HTTP calls rather
-  // than mock writes the query layer was subscribed to. Refetching both is
-  // what keeps "3 unread" and the rows underneath it telling the same story.
+  // neither refreshes on its own. Refetching both is what keeps "3 unread"
+  // and the rows underneath it telling the same story.
+  const refreshFeed = state.refresh;
+  const refreshSummary = summary.refresh;
   const refreshAll = React.useCallback(() => {
-    state.refresh();
-    summary.refresh();
-  }, [state.refresh, summary.refresh]);
+    refreshFeed();
+    refreshSummary();
+  }, [refreshFeed, refreshSummary]);
 
   const markRead = useMarkAlertRead();
   const markAllRead = useMarkAllAlertsRead(refreshAll);

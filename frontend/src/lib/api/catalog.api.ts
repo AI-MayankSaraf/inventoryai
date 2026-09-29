@@ -3,16 +3,15 @@
  *
  * Everything here talks to the real FastAPI backend (`/catalog/*`,
  * `/inventory/*`): products, variants, masters, UoM conversions, per-godown
- * reorder levels, supplier links, stock totals and the in-use check. The
- * only thing still imported from `@/mock/repository` is `query()`, the pure
- * client-side search/sort/paging helper — no mock *data* is read.
+ * reorder levels, supplier links, stock totals and the in-use check. Search,
+ * sort and paging over the fetched lists use `query()` from `./list-query`.
  *
  * The frontend's `ProductInput`/`ProductDetail` treat "product" as one
  * merged form (name + SKU + prices together), but the backend splits that
  * into two resources: `/catalog/products` (the catalogue item) and
  * `/catalog/variants` (the SKU). `createProduct`/`updateProduct` write both;
  * `getProduct` reads both and merges them back into one `ProductDetail`,
- * matching how the mock version built a `Product` and a `ProductVariant` row.
+ * so screens keep working with one merged product.
  *
  * The correction that still matters: a product form cannot set stock.
  * `currentStock` does not exist on a variant, and there is no field, payload
@@ -20,7 +19,7 @@
  * Opening stock is a posted inventory transaction like any other (C2, C3).
  */
 
-import { indexById, query } from "@/mock/repository";
+import { indexById, query } from "./list-query";
 import type {
   Brand,
   Category,
@@ -112,6 +111,7 @@ interface GodownOut {
   gstin: string | null;
   is_default: boolean;
   is_active: boolean;
+  incharge_user_id?: string | null;
 }
 
 /* -------------------------------------------------- snake_case -> camelCase */
@@ -214,8 +214,7 @@ function toGodown(g: GodownOut): Godown {
     stateCode: g.state_code,
     address: g.address ?? undefined,
     gstin: g.gstin,
-    // No backend field for who's in charge or capacity — mock-only extras.
-    inchargeUserId: null,
+    inchargeUserId: g.incharge_user_id ?? null,
     isDefault: g.is_default,
     isActive: g.is_active,
     deletedAt: null,
@@ -270,7 +269,7 @@ async function fetchStockTotals(): Promise<Map<Id, number>> {
 /** Fetches products + variants + the master lookups needed to label them.
  * There's no free-text search on the backend (rule 7 of the wiring brief),
  * so this pulls a generously large page and `query()` below does the
- * search/sort/filter/pagination client-side, exactly like the mock did. */
+ * search/sort/filter/pagination client-side. */
 async function fetchProductListRows(): Promise<ProductListRow[]> {
   const [products, variants, brands, categories, uoms, stockTotals] = await Promise.all([
     httpGet<ProductOut[]>("/catalog/products", { limit: 500 }),
@@ -306,7 +305,7 @@ async function fetchProductListRows(): Promise<ProductListRow[]> {
       mrp: variant.mrp,
       reorderPoint: variant.reorder_point,
       trackingType: (product?.tracking_type ?? "none") as Product["trackingType"],
-      // No backend field — mock-only decoration.
+      // Not stored by the backend; screens show the default icon.
       displayEmoji: undefined,
       isActive: variant.is_active && (product?.is_active ?? true),
       totalStock: stockByVariant.get(variant.id) ?? 0,

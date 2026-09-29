@@ -2,17 +2,23 @@
  * Browser write-path test — the auth gaps: forgot/reset password, the
  * email settings panel, and changing your own password.
  *
- *   node browser_auth.js [http://localhost:3000]
+ *   node tests/browser_auth.js [http://localhost:3000]
  */
 const { chromium } = require("playwright");
 
-// Owner-role connection for the direct reads/writes below. Override with
-// TEST_DATABASE_URL (same database as backend/.env DATABASE_URL, without
-// the +asyncpg driver suffix).
-const DB_URL = process.env.TEST_DATABASE_URL || "postgresql://inventoryai:inventoryai_dev@localhost/inventoryai";
+// Owner-role connection for the direct reads/writes below: TEST_DATABASE_URL,
+// else backend/.env's DATABASE_URL without the +asyncpg driver suffix.
+function ownerDbUrl() {
+  if (process.env.TEST_DATABASE_URL) return process.env.TEST_DATABASE_URL;
+  const envFile = require("path").join(__dirname, "..", "backend", ".env");
+  const line = require("fs").readFileSync(envFile, "utf8").split(/\r?\n/).find((l) => l.startsWith("DATABASE_URL="));
+  if (!line) throw new Error("Set TEST_DATABASE_URL, or DATABASE_URL in backend/.env");
+  return line.slice("DATABASE_URL=".length).trim().replace("+asyncpg", "");
+}
+const DB_URL = ownerDbUrl();
 
-const BASE = process.argv[2] || "http://localhost:3000";
-const API = "http://127.0.0.1:8000";
+const BASE = process.argv[2] || process.env.APP_URL || "http://localhost:3000";
+const API = process.env.API_URL || "http://127.0.0.1:8000";
 const SFX = Math.random().toString(36).slice(2, 7).toLowerCase();
 const EMAIL = `browser.auth.${SFX}@acme-demo.test`;
 

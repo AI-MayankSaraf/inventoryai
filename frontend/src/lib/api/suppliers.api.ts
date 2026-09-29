@@ -18,7 +18,7 @@ import type {
   SupplierPerformance,
   SupplierProduct,
 } from "@/types";
-import { query } from "@/mock/repository";
+import { query } from "./list-query";
 import {
   httpDelete,
   httpGet,

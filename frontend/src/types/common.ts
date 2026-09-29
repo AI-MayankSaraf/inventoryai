@@ -2,9 +2,7 @@
  * Shared primitives for the whole domain model.
  *
  * These types mirror `02_DATABASE_DESIGN.md`. Anything that will be a column
- * in PostgreSQL is represented here the way the backend will return it, so
- * swapping the mock API for the real one is a change of implementation, not
- * of shape.
+ * in PostgreSQL is represented here the way the backend returns it.
  */
 
 /** Every entity is keyed by an opaque id. The backend will issue UUIDs. */

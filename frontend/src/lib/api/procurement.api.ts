@@ -1,20 +1,17 @@
 /**
  * RFQ → Quotation → Comparison → Purchase Order → Proforma.
  *
- * RFQ, Purchase Order, Quotation and Comparison all talk to the real
- * FastAPI backend now (`/procurement/rfqs`, `/procurement/purchase-orders`,
- * `/procurement/quotations`, `/procurement/comparisons`). Proforma has no
- * backend endpoint at all (no proforma intake in this backend) and stays on
- * the mock repository, unchanged — see that section's own comments.
+ * Every step talks to the real FastAPI backend (`/procurement/rfqs`,
+ * `/procurement/quotations`, `/procurement/comparisons`,
+ * `/procurement/purchase-orders`, `/proforma-invoices`).
  *
  * Three corrections from the original prototype still apply throughout:
  *
  *  - Documents are addressed by id. `getPurchaseOrder(id)` takes the PO's id,
  *    not its number, and every link between documents is an id column (C12).
  *  - Totals come from the money engine, and inter-state is derived from the
- *    supplier's state versus the place of supply (C13, C14) — for the real
- *    PO endpoint the backend now does this itself; for the still-mock
- *    quotation/comparison/proforma flow it's still computed here.
+ *    supplier's state versus the place of supply (C13, C14). The backend
+ *    computes the saved figures; this file only previews them in forms.
  *  - Status changes are checked against that document's own transition
  *    table where a state machine still runs client-side (quotations,
  *    proforma); RFQ/PO status changes are now specific backend action
@@ -28,10 +25,8 @@ import {
   purchaseOrderTransitions,
   rfqTransitions,
 } from "@/lib/domain/state-machines";
-// `query` is the shared client-side list filter/sort/paginate helper. It
-// happens to live in the mock package but reads nothing from it — every
-// list below hands it rows fetched from the real API.
-import { indexById, query } from "@/mock/repository";
+// `query` filters, sorts and pages rows already fetched from the API.
+import { indexById, query } from "./list-query";
 import type {
   ComparisonCell,
   ComparisonRowView,
@@ -1584,9 +1579,9 @@ export async function createPurchaseOrder(input: PurchaseOrderInput): Promise<Pu
     rfq_id: input.rfqId ?? undefined,
     freight_amount: input.freightAmount,
     other_charges: input.otherCharges,
-    // `quotationId`/`comparisonId`/`notes` have no field on `PoCreate` —
-    // dropped, known gap (the quotation/comparison flow they'd come from is
-    // entirely mock anyway).
+    // `quotationId`/`comparisonId`/`notes` have no field on `PoCreate`; a PO
+    // raised from a comparison goes through the comparison's own convert
+    // endpoint, which links them.
     items: input.lines.map((line) => {
       const variant = maps.variantsById.get(line.productVariantId);
       const product = variant ? maps.productsById.get(variant.product_id) : undefined;

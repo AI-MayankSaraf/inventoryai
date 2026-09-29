@@ -1,10 +1,8 @@
 /**
  * The API surface.
  *
- * Screens import from here and nowhere else. They must never import
- * `@/mock/*` directly — the mock database is an implementation detail of this
- * layer, and the whole point of the layering (UI → hooks → API → repository)
- * is that replacing it with HTTP touches only these files.
+ * Screens import from here and nowhere else (UI → hooks → API → backend), so
+ * the details of talking HTTP to the backend stay inside these files.
  */
 
 export * as adminApi from "./admin.api";
@@ -19,4 +17,3 @@ export * as receivingApi from "./receiving.api";
 export * as suppliersApi from "./suppliers.api";
 
 export { ApiError, errorMessage, isApiError } from "./client";
-export { recordAudit } from "./audit";

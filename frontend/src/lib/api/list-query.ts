@@ -1,128 +1,18 @@
 /**
- * Generic table access over the mock database.
+ * Client-side list querying: search, filters, facets, sort and paging over
+ * rows the API has already returned.
  *
- * This is the layer that pretends to be PostgreSQL: it understands
- * `ListParams` (search, filters, sort, keyset cursor, date range) and returns
- * `ListResponse<T>`, exactly like the real collection endpoints will. Screens
- * therefore build a query object instead of filtering arrays in render, and
- * moving the work to the server later changes nothing above this line.
+ * Several screens fetch a whole collection from the backend and let the user
+ * slice it in the browser. `query()` takes the same `ListParams` a list screen
+ * builds and returns a `ListResponse`, so those screens look exactly like the
+ * ones whose filtering happens on the server.
  */
 
 import type { Id, ListParams, ListResponse } from "@/types";
-import { getDb, mutate, type MockDatabase } from "./db";
 
-type TableName = {
-  [K in keyof MockDatabase]: MockDatabase[K] extends unknown[] ? K : never;
-}[keyof MockDatabase];
-
-export type Row<K extends TableName> = MockDatabase[K][number];
-
-export function table<K extends TableName>(name: K): MockDatabase[K] {
-  return getDb()[name];
-}
-
-/* -------------------------------------------------------------- Reading */
-
-export function all<K extends TableName>(name: K): Row<K>[] {
-  return table(name).slice() as Row<K>[];
-}
-
-export function byId<K extends TableName>(name: K, id: Id): Row<K> | undefined {
-  return (table(name) as { id: Id }[]).find((r) => r.id === id) as Row<K> | undefined;
-}
-
-export function where<K extends TableName>(
-  name: K,
-  predicate: (row: Row<K>) => boolean,
-): Row<K>[] {
-  return (table(name) as Row<K>[]).filter(predicate);
-}
-
-export function first<K extends TableName>(
-  name: K,
-  predicate: (row: Row<K>) => boolean,
-): Row<K> | undefined {
-  return (table(name) as Row<K>[]).find(predicate);
-}
-
-/** Index a table by id for O(1) joins inside a service. */
+/** Rows keyed by id, for joining one list onto another. */
 export function indexById<T extends { id: Id }>(rows: T[]): Map<Id, T> {
   return new Map(rows.map((r) => [r.id, r]));
-}
-
-/* -------------------------------------------------------------- Writing */
-
-export function insert<K extends TableName>(name: K, row: Row<K>): Row<K> {
-  mutate((db) => {
-    (db[name] as unknown[]).push(row);
-  });
-  return row;
-}
-
-export function insertMany<K extends TableName>(name: K, rows: Row<K>[]): Row<K>[] {
-  mutate((db) => {
-    (db[name] as unknown[]).push(...rows);
-  });
-  return rows;
-}
-
-export function update<K extends TableName>(
-  name: K,
-  id: Id,
-  patch: Partial<Row<K>>,
-): Row<K> | undefined {
-  return mutate((db) => {
-    const rows = db[name] as unknown as { id: Id }[];
-    const index = rows.findIndex((r) => r.id === id);
-    if (index === -1) return undefined;
-    rows[index] = { ...rows[index], ...patch };
-    return rows[index] as Row<K>;
-  });
-}
-
-/** Apply a function to every row matching a predicate. */
-export function updateWhere<K extends TableName>(
-  name: K,
-  predicate: (row: Row<K>) => boolean,
-  patch: (row: Row<K>) => Partial<Row<K>>,
-): Row<K>[] {
-  return mutate((db) => {
-    const rows = db[name] as unknown as Row<K>[];
-    const touched: Row<K>[] = [];
-    rows.forEach((row, index) => {
-      if (!predicate(row)) return;
-      rows[index] = { ...row, ...patch(row) };
-      touched.push(rows[index]);
-    });
-    return touched;
-  });
-}
-
-export function remove<K extends TableName>(name: K, id: Id): boolean {
-  return mutate((db) => {
-    const rows = db[name] as unknown as { id: Id }[];
-    const index = rows.findIndex((r) => r.id === id);
-    if (index === -1) return false;
-    rows.splice(index, 1);
-    return true;
-  });
-}
-
-export function removeWhere<K extends TableName>(
-  name: K,
-  predicate: (row: Row<K>) => boolean,
-): number {
-  return mutate((db) => {
-    const rows = db[name] as unknown as Row<K>[];
-    let removed = 0;
-    for (let i = rows.length - 1; i >= 0; i -= 1) {
-      if (predicate(rows[i])) {
-        rows.splice(i, 1);
-        removed += 1;
-      }
-    }
-    return removed;
-  });
 }
 
 /* ------------------------------------------------------------- Querying */
@@ -178,7 +68,7 @@ function decodeCursor(cursor: string | null | undefined): number {
   }
 }
 
-export const DEFAULT_PAGE_SIZE = 25;
+const DEFAULT_PAGE_SIZE = 25;
 
 /** Run a `ListParams` query over an array of rows. */
 export function query<T extends Record<string, unknown>>(
@@ -257,13 +147,4 @@ export function query<T extends Record<string, unknown>>(
     total,
     facets,
   };
-}
-
-/** Convenience for screens that want every matching row, not a page. */
-export function queryAll<T extends Record<string, unknown>>(
-  rows: T[],
-  params: ListParams = {},
-  config: QueryConfig<T> = {},
-): ListResponse<T> {
-  return query(rows, { ...params, limit: Number.MAX_SAFE_INTEGER, cursor: null }, config);
 }

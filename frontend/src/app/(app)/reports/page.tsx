@@ -120,15 +120,16 @@ export default function ReportsPage() {
 
   const accepts = (param: string) => definition?.params.includes(param as never) ?? false;
 
+  const definitionList = definitions.data;
   const groups = React.useMemo(() => {
-    const byGroup = new Map<string, typeof definitions.data>();
-    for (const definition of definitions.data ?? []) {
+    const byGroup = new Map<string, NonNullable<typeof definitionList>>();
+    for (const definition of definitionList ?? []) {
       const list = byGroup.get(definition.group) ?? [];
       list.push(definition);
-      byGroup.set(definition.group, list as never);
+      byGroup.set(definition.group, list);
     }
     return [...byGroup.entries()];
-  }, [definitions.data]);
+  }, [definitionList]);
 
   return (
     <div className="space-y-5">

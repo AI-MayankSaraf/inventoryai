@@ -16,8 +16,7 @@
 
 import { round3 } from "@/lib/domain/money";
 import { allowedTransitions, goodsReceiptTransitions } from "@/lib/domain/state-machines";
-// `query`/`indexById` are pure helpers — no mock *data* is read in this file.
-import { indexById, query } from "@/mock/repository";
+import { indexById, query } from "./list-query";
 import type {
   BatchInput,
   DocumentVariance,

@@ -58,7 +58,7 @@ export function Sidebar({
   // no company, so asking would 403 on every page — skip it for them, and
   // until the session has loaded (see `useIsTenantUser`).
   const badgeQuery = useNavBadges(useIsTenantUser());
-  const badges: NavBadges = badgeQuery.data ?? {};
+  const badges = React.useMemo<NavBadges>(() => badgeQuery.data ?? {}, [badgeQuery.data]);
 
   /**
    * Nav is filtered by permission, so a role is never shown a destination it

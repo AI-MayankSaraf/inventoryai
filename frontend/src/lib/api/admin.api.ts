@@ -13,7 +13,7 @@
  * those endpoints answer only to a platform admin's token.
  */
 
-import { indexById, query } from "@/mock/repository";
+import { indexById, query } from "./list-query";
 import type {
   Company,
   CompanySettings,
@@ -30,8 +30,17 @@ import type {
   RoleCode,
   User,
 } from "@/types";
-import { actorId, actorName } from "./audit";
+import { currentSession } from "./auth.api";
 import { httpDelete, httpGet, httpPatch, httpPost, httpPut, notFound, reject, validationFailed } from "./client";
+
+/** Whoever is signed in, for "invited by" on an invitation. */
+function actorId(): Id {
+  return currentSession()?.id ?? "usr_system";
+}
+
+function actorName(): string {
+  return currentSession()?.fullName ?? "System";
+}
 
 /* --------------------------------------------------------- Backend shapes */
 
@@ -167,7 +176,7 @@ function toInvitation(o: InvitationOut): Invitation {
     id: o.id,
     email: o.email,
     fullName: o.full_name,
-    // No backend field for the invite's mock role id — the users-screen
+    // An invitation carries a role code, not a role id — the users-screen
     // table already falls back to `roleCode` for display when `roleId`
     // doesn't match a known role, so this is a safe simplification.
     roleId: "",
@@ -317,12 +326,11 @@ export interface UserListRow extends User {
 
 export async function listUsers(params: ListParams = {}): Promise<ListResponse<UserListRow>> {
   // No free-text search/sort on the backend (rule 7 of the wiring brief) —
-  // fetch a generously large page and let `query()` do the rest client-side,
-  // exactly like the mock did.
+  // fetch a generously large page and let `query()` do the rest client-side.
   const [usersOut, godowns, roles] = await Promise.all([
     httpGet<UserOut[]>("/users", { limit: 500 }),
     httpGet<GodownOut[]>("/catalog/godowns", { limit: 500 }),
-    listRoles(), // stays mock — just the 6 fixed roles, used here to label role_code
+    listRoles(), // used here to label role_code
   ]);
   const godownsById = indexById(godowns);
   const roleNameByCode = new Map(roles.map((r) => [r.code, r.name]));
@@ -683,8 +691,7 @@ export async function updateGodown(godownId: Id, input: GodownInput): Promise<Go
  * The deactivation guard.
  *
  * Every clause is real now: stock on hand, open purchase orders delivering
- * here, and users scoped to this godown. It used to read the mock tables,
- * which meant a godown holding real stock reported itself free to retire.
+ * here, and users scoped to this godown.
  */
 export async function getGodownUsage(godownId: Id): Promise<{ inUse: boolean; reason?: string }> {
   const u = await httpGet<GodownUsageOut>(`/company/godown-usage/${godownId}`);
@@ -693,7 +700,7 @@ export async function getGodownUsage(godownId: Id): Promise<{ inUse: boolean; re
 
 export async function deactivateGodown(godownId: Id): Promise<void> {
   const godown = await httpGet<GodownOut>(`/catalog/godowns/${godownId}`);
-  const usage = await getGodownUsage(godownId); // stays mock — see above
+  const usage = await getGodownUsage(godownId);
   if (usage.inUse) reject(`${godown.name} cannot be removed — ${usage.reason}.`, "BR-MD-10");
   if (godown.is_default) reject("Set another godown as the default first.", "BR-MD-11");
   await httpDelete(`/catalog/godowns/${godownId}`);
@@ -729,8 +736,8 @@ export async function updateCompanySettings(patch: Partial<CompanySettings>): Pr
   if (errors.length) validationFailed(errors);
 
   // Only send keys actually present in `patch` (PATCH's exclude_unset
-  // semantics, rule 6). `patch.numbering` has no backend field (document
-  // sequences stay fully on mock) — silently dropped if present.
+  // semantics, rule 6). `patch.numbering` is not a settings field — document
+  // sequences have their own endpoint — so it is dropped if present.
   const body: Record<string, unknown> = {};
   if (patch.currencyCode !== undefined) body.currency_code = patch.currencyCode;
   if (patch.defaultGstRate !== undefined) body.default_gst_rate = patch.defaultGstRate;

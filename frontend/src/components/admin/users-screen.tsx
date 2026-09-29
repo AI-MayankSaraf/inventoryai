@@ -98,15 +98,16 @@ export function UsersScreen() {
   const godowns = godownsState.data ?? [];
 
   // Every mutation on this screen changes a list on it, and none of those
-  // lists refresh by themselves any more: they used to re-render because the
-  // mock store notified them, and real HTTP writes notify nobody. So each
-  // write names what it invalidates. Role user counts move with the user
-  // list, so a user change refreshes the roles too.
+  // lists refresh by themselves, so each write names what it invalidates.
+  // Role user counts move with the user list, so a user change refreshes the
+  // roles too.
   const refreshInvitations = invitationsState.refresh;
+  const refreshUserList = usersState.refresh;
+  const refreshRoles = rolesState.refresh;
   const refreshUsers = React.useCallback(() => {
-    usersState.refresh();
-    rolesState.refresh();
-  }, [usersState.refresh, rolesState.refresh]);
+    refreshUserList();
+    refreshRoles();
+  }, [refreshUserList, refreshRoles]);
 
   // The newest accept link from an invite or resend (development only).
   const [latestInvite, setLatestInvite] = React.useState<Invitation | null>(null);

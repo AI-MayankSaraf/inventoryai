@@ -120,7 +120,7 @@ export function useAssistant() {
 /* Product embeddings */
 
 export function useEmbeddingStatus(enabled = true) {
-  return useApiQuery(["embedding-status"], () => documentsApi.getEmbeddingStatus(), { enabled, live: false });
+  return useApiQuery(["embedding-status"], () => documentsApi.getEmbeddingStatus(), { enabled });
 }
 
 export function useRebuildEmbeddings(onSuccess?: () => void) {

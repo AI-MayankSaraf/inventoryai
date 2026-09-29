@@ -2,8 +2,7 @@
  * Supplier invoices and purchase returns.
  *
  * Both talk to the real backend now (`/supplier-invoices`,
- * `/purchase-returns`). The consequence worth stating: **this module no
- * longer writes to the mock ledger.** Confirming a purchase return posts
+ * `/purchase-returns`). Confirming a purchase return posts
  * `PURCHASE_RETURN` transactions server-side, through the same
  * `core/inventory.post_transaction` choke point every other movement goes
  * through — so the stock it removes is the stock every other screen reads,
@@ -16,9 +15,7 @@
 
 import { taxBreakdown } from "@/lib/domain/money";
 import { allowedTransitions, purchaseReturnTransitions, supplierInvoiceTransitions } from "@/lib/domain/state-machines";
-// `query` is the shared client-side list filter/sort helper; it reads
-// nothing from the mock repository, and every row below comes from the API.
-import { query } from "@/mock/repository";
+import { query } from "./list-query";
 import type {
   Id,
   ListParams,

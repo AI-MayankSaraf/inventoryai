@@ -6,8 +6,7 @@
  * profile fields a JWT doesn't carry (full name, company name, the role's
  * display name). `SessionUser` is cached in `localStorage` under
  * `SESSION_CACHE_KEY` purely so `currentSession()` can stay synchronous —
- * every route guard and the mock audit-log stamper (`./audit.ts`) rely on
- * that — while the actual source of truth is always the token plus the
+ * every route guard relies on that — while the actual source of truth is always the token plus the
  * next `getSession()` refetch.
  *
  * Password reset, password change and impersonation are real too

@@ -99,7 +99,7 @@ export function PoForm() {
   const suppliers = suppliersState.data?.items ?? [];
   const godowns = godownsState.data ?? [];
   const products = productsState.data?.items ?? [];
-  const uoms = uomsState.data ?? [];
+  const uoms = React.useMemo(() => uomsState.data ?? [], [uomsState.data]);
   const uomsByCode = React.useMemo(() => new Map(uoms.map((u) => [u.code, u])), [uoms]);
 
   const supplier = suppliers.find((s) => s.id === supplierId);

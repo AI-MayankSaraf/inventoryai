@@ -10,7 +10,7 @@
 const { chromium } = require("playwright");
 
 const BASE = process.argv[2] || "http://localhost:3000";
-const API = "http://127.0.0.1:8000";
+const API = process.env.API_URL || "http://127.0.0.1:8000";
 const SFX = Math.random().toString(36).slice(2, 7).toUpperCase();
 const TODAY = new Date().toISOString().slice(0, 10);
 

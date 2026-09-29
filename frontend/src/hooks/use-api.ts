@@ -8,18 +8,12 @@
  * makes the app behave correctly around asynchronous data — loading states,
  * caching, dedup, refetch after a mutation.
  *
- * `useApiQuery` is a thin wrapper over TanStack Query. Two things it adds on
- * top:
- *
- *   * A `live` subscription to the mock database (`@/mock/db`), for the
- *     screens still on the mock repos (`documents.api.ts`, `invoices.api.ts`,
- *     `ops.api.ts`) — a mutation anywhere invalidates every query reading
- *     the affected data, the same contract the old hand-rolled version had.
- *   * `key` scoping: every call site must pass a `QueryKey` array whose first
- *     element uniquely identifies *what* is being fetched (e.g. `["brands"]`,
- *     `["product", productVariantId]`) — TanStack Query caches by this key,
- *     not by the fetcher function, so two different endpoints must never
- *     share a key or they will read each other's cached data.
+ * `useApiQuery` is a thin wrapper over TanStack Query. Every call site must
+ * pass a `QueryKey` array whose first element uniquely identifies *what* is
+ * being fetched (e.g. `["brands"]`, `["product", productVariantId]`) —
+ * TanStack Query caches by this key, not by the fetcher function, so two
+ * different endpoints must never share a key or they will read each other's
+ * cached data.
  *
  * `staleTime` (set globally in `src/app/providers.tsx`) is what actually
  * fixes the "every page flashes a spinner" symptom: revisiting a screen
@@ -30,7 +24,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { errorMessage } from "@/lib/api";
-import { subscribe } from "@/mock/db";
 
 export interface QueryState<T> {
   data: T | undefined;
@@ -44,8 +37,6 @@ export interface QueryState<T> {
 export interface QueryOptions {
   /** Skip the request entirely — for dependent queries. */
   enabled?: boolean;
-  /** Re-run when the mock database changes. Default true. */
-  live?: boolean;
 }
 
 export function useApiQuery<T>(
@@ -53,18 +44,12 @@ export function useApiQuery<T>(
   fetcher: () => Promise<T>,
   options: QueryOptions = {},
 ): QueryState<T> {
-  const { enabled = true, live = true } = options;
+  const { enabled = true } = options;
   const queryClient = useQueryClient();
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
 
   const keySignature = JSON.stringify(key);
-
-  useEffect(() => {
-    if (!live) return;
-    return subscribe(() => queryClient.invalidateQueries({ queryKey: key }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live, keySignature, queryClient]);
 
   const query = useQuery<T>({
     queryKey: key,
