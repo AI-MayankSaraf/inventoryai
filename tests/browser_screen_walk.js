@@ -58,6 +58,7 @@ async function run(name, email, pw, routes, browser, extraRoutes) {
   }
   console.log(`[${name}] ${all.length} screens, ${problems} with problems\n`);
   await ctx.close();
+  return { screens: all.length, problems };
 }
 
 (async () => {
@@ -69,7 +70,8 @@ async function run(name, email, pw, routes, browser, extraRoutes) {
     "/inventory/current-stock", "/inventory/by-godown", "/inventory/transactions", "/inventory/transfers",
     "/inventory/low-stock", "/ai-documents", "/schema-mappings", "/assistant", "/alerts", "/reports", "/users",
     "/roles", "/audit", "/settings", "/profile"];
-  await run("OWNER", "owner@acme-demo.test", "Demo@12345", lists, browser, async (t) => {
+  const results = [];
+  results.push(await run("OWNER", "owner@acme-demo.test", "Demo@12345", lists, browser, async (t) => {
     const first = async (p) => (await api(p + (p.includes("?") ? "&" : "?") + "limit=1", t))[0];
     const routes = [];
     const add = async (list, fmt) => { const x = await first(list); if (x) routes.push(fmt(x)); };
@@ -86,13 +88,20 @@ async function run(name, email, pw, routes, browser, extraRoutes) {
     await add("/ai/documents", (x) => `/ai-documents/review/${x.id}`);
     await add("/ai/schema-mappings", (x) => `/schema-mappings/${x.id}`);
     return routes;
-  });
-  await run("PLATFORM", "platform-admin@inventoryai.test", "Platform@12345", ["/system-admin", "/profile"], browser);
-  // Supplier portal: public login page only (see report — it is mock-backed).
+  }));
+  results.push(await run("PLATFORM", "platform-admin@inventoryai.test", "Platform@12345", ["/system-admin", "/profile"], browser));
+  // Supplier portal: public login page only; the signed-in portal has its own suite.
   const p = await browser.newPage();
   const errs = [];
   p.on("pageerror", (e) => errs.push(String(e)));
   await p.goto(BASE + "/supplier-portal/login", { waitUntil: "networkidle" });
   console.log(`${errs.length ? "!!" : "ok"} /supplier-portal/login ${errs.join(" ")}`);
+  results.push({ screens: 1, problems: errs.length ? 1 : 0 });
   await browser.close();
+  // Same summary line as the other suites, and a failing exit code, so a
+  // runner or CI job cannot mistake a broken screen for a pass.
+  const screens = results.reduce((n, r) => n + r.screens, 0);
+  const problems = results.reduce((n, r) => n + r.problems, 0);
+  console.log(`${screens - problems} passed, ${problems} failed`);
+  process.exit(problems ? 1 : 0);
 })().catch((e) => { console.error("FATAL", e); process.exit(1); });

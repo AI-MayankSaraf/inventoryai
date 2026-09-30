@@ -31,6 +31,7 @@ import io
 import json
 import mimetypes
 import sys
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -70,7 +71,33 @@ def call(method: str, path: str, token: str | None = None, body: object = None) 
             return e.code, raw.decode(errors="replace")
 
 
+#: Status the upload itself answered with, for the check that reading is
+#: now done in the background rather than inside the request.
+upload_statuses: list[str] = []
+
+
+def wait_for_job(token: str, document_id: str, timeout: float = 180) -> dict:
+    """The worker reads documents after the upload returns; wait for it."""
+    deadline = time.monotonic() + timeout
+    while True:
+        st, job = call("GET", f"/ai/documents/{document_id}/job", token)
+        if st != 200 or job["processing_status"] not in ("queued", "processing") or time.monotonic() > deadline:
+            return job
+        time.sleep(0.5)
+
+
 def upload(token: str, filename: str, content: bytes, **fields) -> tuple[int, object]:
+    """Upload, wait for the worker to read it, and return the upload
+    response with the document as it stands afterwards."""
+    st, body = _post_file(token, filename, content, **fields)
+    if st == 201 and isinstance(body, dict) and body.get("job_id"):
+        upload_statuses.append(body["document"]["processing_status"])
+        wait_for_job(token, body["document"]["id"])
+        body["document"] = call("GET", f"/ai/documents/{body['document']['id']}", token)[1]
+    return st, body
+
+
+def _post_file(token: str, filename: str, content: bytes, **fields) -> tuple[int, object]:
     """multipart/form-data by hand — the suite has no third-party deps."""
     boundary = f"----e2e{uuid.uuid4().hex}"
     buffer = io.BytesIO()
@@ -198,6 +225,8 @@ def main() -> int:  # noqa: C901 — a pipeline suite is a long list of cases
     check("U04 the letterhead is not mistaken for the column headings — 3 items, not 0",
           document["items_found"] == 3, document)
     check("U05 it lands in review, never approved", document["processing_status"] == "review_required", document)
+    check("U05b the upload returns before the document is read — a worker reads it",
+          upload_statuses[:1] == ["queued"], upload_statuses)
 
     st, again = upload(owner, f"quote-{SFX}-copy.csv", content)
     check("U06 the same bytes are a duplicate, not a second document (BR-DOC-02)",
@@ -235,8 +264,12 @@ def main() -> int:  # noqa: C901 — a pipeline suite is a long list of cases
     check("E07 the pipeline trace records each stage",
           {t["stage"] for t in extraction["pipeline_trace"]} >= {"parse", "classify", "match"},
           extraction["pipeline_trace"])
-    check("E08 the screen is told which rungs did not run",
-          any(not p["configured"] for p in extraction["providers"]), extraction["providers"])
+    # Works with or without an AI provider: the screen is told the status
+    # of each optional rung, whichever it is on this install.
+    configured = {p["kind"]: p["configured"] for p in extraction["providers"]}
+    check("E08 the screen is told whether each optional rung is configured",
+          {"embedding", "llm"} <= set(configured) and all(isinstance(v, bool) for v in configured.values()),
+          extraction["providers"])
 
     # BR-AI-02's cross-check: the printed amount on line 1 is nonsense.
     check("E09 a printed total that disagrees with quantity x price is flagged, not adopted",
@@ -248,8 +281,9 @@ def main() -> int:  # noqa: C901 — a pipeline suite is a long list of cases
     check("L01 a line quoting our own SKU is matched automatically",
           lines[0]["match_method"] == "exact_sku" and lines[0]["final_decision"] == "accepted_ai", lines[0])
     check("L02 …and its confidence is full", lines[0]["confidence"] == 100, lines[0])
-    check("L03 a text-similarity match is only a suggestion (BR-AI-04)",
-          lines[1]["match_method"] == "trigram" and lines[1]["final_decision"] is None, lines[1])
+    # Text similarity, or meaning when embeddings are on: either way a guess.
+    check("L03 a similarity match is only a suggestion (BR-AI-04)",
+          lines[1]["match_method"] in ("trigram", "embedding") and lines[1]["final_decision"] is None, lines[1])
     check("L04 …and it comes with the evidence for the guess",
           lines[1]["candidates"] and lines[1]["candidates"][0]["reasons"], lines[1]["candidates"][:1])
     check("L05 a line nothing recognises is left for a person",
@@ -259,8 +293,10 @@ def main() -> int:  # noqa: C901 — a pipeline suite is a long list of cases
 
     st, suggestions = call("GET", f"/ai/lines/{lines[1]['id']}/candidates", owner)
     check("L07 the shortlist can be asked for again", st == 200 and suggestions["candidates"], suggestions)
-    check("L08 …and says which rungs were skipped for want of a provider",
-          set(suggestions["skipped_rungs"]) == {"embedding", "llm"}, suggestions["skipped_rungs"])
+    # The LLM rung never runs per line (by design); embedding runs when configured.
+    expected_skipped = {"llm"} | ({"embedding"} if not configured["embedding"] else set())
+    check("L08 …and says which rungs were skipped",
+          set(suggestions["skipped_rungs"]) == expected_skipped, (suggestions["skipped_rungs"], expected_skipped))
 
     # ========================================================== approval
     print("\n[approval is blocked until a person decides]")
@@ -377,8 +413,12 @@ def main() -> int:  # noqa: C901 — a pipeline suite is a long list of cases
           {"product_description", "quantity", "unit_price"} <= mapped_codes, mapped_codes)
     check("M04 the signature is a hash of the header row, not of the file",
           len(mapping["column_signature"]) == 64, mapping["column_signature"])
-    check("M04b the column it has never seen is offered for mapping, not dropped",
-          any(f"Remarks {SFX}" == c for c in mapping["unmapped_columns"]), mapping["unmapped_columns"])
+    # Unmapped for a person to place, or read by meaning when an AI provider
+    # is configured — but never silently dropped.
+    check("M04b the column it has never seen is offered for mapping or read by meaning, not dropped",
+          f"Remarks {SFX}" in mapping["unmapped_columns"]
+          or any(f["source_column"] == f"Remarks {SFX}" for f in mapping["fields"]),
+          (mapping["unmapped_columns"], [f["source_column"] for f in mapping["fields"]]))
 
     st, confirmed_mapping = call("POST", f"/ai/schema-mappings/{mapping_id}/confirm", owner)
     check("M05 a person can confirm it", st == 200 and confirmed_mapping["status"] == "confirmed", confirmed_mapping)
@@ -511,7 +551,11 @@ def main() -> int:  # noqa: C901 — a pipeline suite is a long list of cases
     # ===================================================== retry
     print("\n[re-running a document]")
     st, job = call("POST", f"/ai/documents/{doc2}/retry", owner)
-    check("R01 a document can be read again", st == 200, (st, job))
+    check("R01 a document can be queued to be read again", st == 200 and job["processing_status"] == "queued", (st, job))
+    st, b = call("POST", f"/ai/documents/{doc2}/retry", owner)
+    check("R01b …but not twice while it is waiting or being read", st == 409, (st, b))
+    job = wait_for_job(owner, doc2)
+    check("R01c the worker reads it again", job["processing_status"] == "review_required", job)
     active = db(
         "SELECT COUNT(*) AS n FROM ai_extraction_results "
         "WHERE document_id = CAST(:d AS uuid) AND superseded_by IS NULL",
@@ -526,6 +570,47 @@ def main() -> int:  # noqa: C901 — a pipeline suite is a long list of cases
     check("R03 …and the earlier one kept, not deleted", superseded >= 1, superseded)
     st, b = call("POST", f"/ai/documents/{document_id}/retry", owner)
     check("R04 an approved document is not re-read", st == 409, (st, b))
+
+    # ================================================ source links, delete
+    print("\n[source documents and deleting]")
+    promoted_id = approval["promoted_to_id"]
+    st, sources = call("GET", f"/ai/sources/supplier_quotation/{promoted_id}", owner)
+    check("K01 the quotation names the file it was read from",
+          st == 200 and [x["id"] for x in sources] == [document_id] and sources[0]["link_role"] == "source",
+          (st, sources))
+    st, b = call("GET", f"/ai/sources/supplier_quotation/{promoted_id}", beta)
+    check("K02 another tenant sees no source for it", st == 200 and b == [], (st, b))
+
+    st, b = call("DELETE", f"/ai/documents/{document_id}", owner)
+    check("K03 a document behind a quotation cannot be deleted (BR-DOC-04)",
+          st == 409 and b.get("code") == "RECORD_IN_USE" and "supplier quotation" in b.get("detail", ""), (st, b))
+    st, b = call("DELETE", f"/ai/documents/{doc2}", viewer)
+    check("K04 deleting needs document.delete", st == 403, (st, b))
+    st, b = call("DELETE", f"/ai/documents/{doc2}", beta)
+    check("K05 another tenant's document is not found", st == 404, (st, b))
+
+    db("UPDATE documents SET processing_status = 'processing' WHERE id = CAST(:d AS uuid)", {"d": doc2})
+    st, b = call("DELETE", f"/ai/documents/{doc2}", owner)
+    check("K06 a document being read cannot be deleted", st == 409, (st, b))
+    db("UPDATE documents SET processing_status = 'review_required' WHERE id = CAST(:d AS uuid)", {"d": doc2})
+
+    key = db("SELECT storage_key FROM documents WHERE id = CAST(:d AS uuid)", {"d": doc2})[0]["storage_key"]
+    st, b = call("DELETE", f"/ai/documents/{doc2}", owner)
+    check("K07 a document nothing was made from can be deleted", st == 204, (st, b))
+    st, b = call("GET", f"/ai/documents/{doc2}", owner)
+    check("K08 …it is gone", st == 404, (st, b))
+    left = db("SELECT (SELECT count(*) FROM ai_extraction_results WHERE document_id = CAST(:d AS uuid)) "
+              " + (SELECT count(*) FROM ai_processing_jobs WHERE document_id = CAST(:d AS uuid)) AS n", {"d": doc2})
+    check("K09 …with its AI results and jobs", left[0]["n"] == 0, left)
+    from app.core import storage
+    check("K10 …and the stored file", not storage.exists(key), key)
+    logged = db("SELECT before_data FROM audit_logs WHERE entity_type = 'document' AND action = 'deleted' "
+                "AND entity_id = CAST(:d AS uuid)", {"d": doc2})
+    check("K11 the deletion is in the audit trail, with the file's name and hash",
+          logged and '"sha256"' in json.dumps(logged[0]["before_data"]) and "null" not in str(logged[0]["before_data"]).split("sha256")[1][:12],
+          logged)
+    st, b = call("DELETE", f"/ai/documents/{doc2}", owner)
+    check("K12 deleting it again is a 404", st == 404, (st, b))
 
     print(f"\n{passed} passed, {len(failed)} failed")
     for f in failed:

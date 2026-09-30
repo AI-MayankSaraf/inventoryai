@@ -157,15 +157,20 @@ def main() -> int:  # noqa: C901
     st, b = upload("/procurement/rfqs/import/preview", owner, "bad.csv",
                    b"Description,Quantity\r\nWidget,5\r\n")
     check("V07 a missing required column is reported by name",
-          st == 200 and b["row_count"] == 0 and any("uom" in e for e in b["errors"]), (st, b))
+          st == 200 and b["row_count"] == 0 and any("unit" in e.lower() for e in b["errors"]), (st, b))
     st, b = upload("/procurement/rfqs/import/preview", owner, "bad.csv",
                    b"Description,Quantity,UOM\r\nWidget,-5,Nos\r\nGadget,3,Barrels\r\nGizmo,2,Nos\r\n")
     check("V08 bad rows are reported with their row numbers",
-          st == 200 and len(b["errors"]) == 2 and "Row 2" in b["errors"][0] and "Row 3" in b["errors"][1], (st, b))
-    st, b = upload("/procurement/rfqs/import/preview", owner, "notes.txt", b"hello")
+          st == 200 and len(b["errors"]) == 2 and "Row 2" in b["errors"][0] and "more than zero" in b["errors"][0]
+          and "row 3" in b["errors"][1].lower(), (st, b))
+    st, b = upload("/procurement/rfqs/import/preview", owner, "notes.pdf", b"hello")
     check("V09 an unsupported file type is a 400", st == 400, (st, b))
+    # .txt is read as delimited text; a single-column file must not crash.
+    st, b = upload("/procurement/rfqs/import/preview", owner, "notes.txt", b"hello")
+    check("V09b a single-column text file is reported, not a crash", st == 200 and b["errors"], (st, b))
     st, b = upload("/procurement/rfqs/import/preview", owner, "empty.csv", b"")
-    check("V10 an empty file is reported, not a crash", st == 200 and b["errors"], (st, b))
+    check("V10 an empty file is refused with a reason, not a crash",
+          st == 400 and "empty" in b.get("detail", "").lower(), (st, b))
 
     print("\n[import]")
     st, b = upload("/procurement/rfqs/import", owner, "bad.csv",

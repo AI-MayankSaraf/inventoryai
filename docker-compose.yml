@@ -1,0 +1,120 @@
+# InventoryAI: Postgres, migrations, API, document worker and web app.
+#
+#   cp .env.example .env          # then fill in every "required" value
+#   docker compose up -d --build
+#
+# Object storage (S3) and email (SMTP) are external services configured in
+# .env. To run everything on one machine with local stand-ins for both, add
+# the local override:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+#
+# See docs/DEPLOYMENT.md.
+
+x-backend-env: &backend-env
+  ENVIRONMENT: ${ENVIRONMENT:-production}
+  DEBUG: ${DEBUG:-false}
+  DATABASE_URL: postgresql+asyncpg://inventoryai:${OWNER_DB_PASSWORD:?OWNER_DB_PASSWORD is required}@db:5432/inventoryai
+  APP_DATABASE_URL: postgresql+asyncpg://inventoryai_app:${APP_DB_PASSWORD:?APP_DB_PASSWORD is required}@db:5432/inventoryai
+  PLATFORM_DATABASE_URL: postgresql+asyncpg://inventoryai_platform:${PLATFORM_DB_PASSWORD:?PLATFORM_DB_PASSWORD is required}@db:5432/inventoryai
+  JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+  SECRETS_KEY: ${SECRETS_KEY:?SECRETS_KEY is required}
+  APP_BASE_URL: ${PUBLIC_WEB_URL:-http://localhost:3000}
+  CORS_ALLOWED_ORIGINS: ${PUBLIC_WEB_URL:-http://localhost:3000}
+  FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+  RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+  S3_BUCKET: ${S3_BUCKET:?S3_BUCKET is required}
+  AWS_REGION: ${AWS_REGION:-ap-south-1}
+  AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  S3_SSE: ${S3_SSE:-AES256}
+  S3_KMS_KEY_ID: ${S3_KMS_KEY_ID:-}
+  EMAIL_PROVIDER: ${EMAIL_PROVIDER:-smtp}
+  EMAIL_FROM: ${EMAIL_FROM:-no-reply@example.com}
+  EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-InventoryAI}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USERNAME: ${SMTP_USERNAME:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+  AI_PROVIDER: ${AI_PROVIDER:-none}
+  AI_BASE_URL: ${AI_BASE_URL:-}
+  AI_API_KEY: ${AI_API_KEY:-}
+  AI_MODEL_SMALL: ${AI_MODEL_SMALL:-}
+  AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-}
+  AI_EMBEDDING_DIMENSIONS: ${AI_EMBEDDING_DIMENSIONS:-0}
+  OCR_PROVIDER: ${OCR_PROVIDER:-tesseract}
+  OCR_LANGUAGES: ${OCR_LANGUAGES:-eng+hin}
+  PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-}
+  # Documents are read by the `worker` service, not inside API requests.
+  EXTRACTION_WORKER: external
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: inventoryai
+      POSTGRES_DB: inventoryai
+      POSTGRES_PASSWORD: ${OWNER_DB_PASSWORD:?OWNER_DB_PASSWORD is required}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD is required}
+      PLATFORM_DB_PASSWORD: ${PLATFORM_DB_PASSWORD:?PLATFORM_DB_PASSWORD is required}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/10-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inventoryai -d inventoryai"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Applies migrations and the reference data every install needs, then
+  # exits. Safe to re-run; the API waits for it on every `up`.
+  migrate:
+    build: ./backend
+    image: inventoryai-backend
+    command: ["sh", "-c", "alembic upgrade head && python -m app.db.seed"]
+    environment: *backend-env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    image: inventoryai-backend
+    restart: unless-stopped
+    environment: *backend-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${API_PORT:-8000}:8000"
+
+  # Reads uploaded documents (parsing, OCR, matching) from the queue in
+  # Postgres. Scale with `docker compose up -d --scale worker=3`.
+  worker:
+    image: inventoryai-backend
+    restart: unless-stopped
+    command: ["python", "-m", "app.worker"]
+    environment: *backend-env
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_API_URL:-http://localhost:8000}
+    image: inventoryai-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+
+volumes:
+  pgdata:

@@ -16,6 +16,7 @@ from typing import Optional
 from sqlalchemy import (
     ARRAY,
     BigInteger,
+    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -72,6 +73,9 @@ class AiProcessingJob(UUIDPkMixin, TenantMixin, AuditMixin, Base):
     finished_at: Mapped[Optional[datetime]] = mapped_column()
     duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
     attempt: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default=text("1"))
+    #: Queue: not claimed before this; put back after a worker died (worker.py).
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    retry_count: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default=text("0"))
     error_code: Mapped[Optional[str]] = mapped_column(Text)
     error_message: Mapped[Optional[str]] = mapped_column(Text)
     request_payload: Mapped[Optional[dict]] = mapped_column(JSONB)
@@ -82,6 +86,7 @@ class AiProcessingJob(UUIDPkMixin, TenantMixin, AuditMixin, Base):
         uq_company_id("ai_processing_jobs"),
         tenant_fk("ai_processing_jobs", "document_id", "documents", ondelete="CASCADE"),
         Index("ix_ai_jobs_queue", "company_id", "status", "created_at"),
+        Index("ix_ai_jobs_claim", "available_at", "created_at", postgresql_where=text("status = 'queued'")),
         enum_check(
             "job_type", ["extraction", "classification", "schema_mapping", "sku_match", "embedding", "assistant"]
         ),

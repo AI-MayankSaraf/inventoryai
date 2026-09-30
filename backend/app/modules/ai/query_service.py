@@ -114,6 +114,25 @@ async def job_status(session: AsyncSession, *, company_id: str, document_id: UUI
     }
 
 
+async def source_documents(
+    session: AsyncSession, *, company_id: str, linked_type: str, linked_id: UUID
+) -> list[dict]:
+    """The files a business record was made from (`document_links`)."""
+    rows = (
+        await session.execute(
+            text(
+                "SELECT d.id, d.original_filename, d.mime_type, d.file_size_bytes, d.document_type, "
+                "       d.uploaded_at, l.link_role, l.linked_at "
+                "FROM document_links l JOIN documents d ON d.id = l.document_id "
+                "WHERE l.company_id = :c AND l.linked_type = :t AND l.linked_id = :id "
+                "ORDER BY l.linked_at"
+            ),
+            {"c": company_id, "t": linked_type, "id": linked_id},
+        )
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
 async def get_extraction(session: AsyncSession, *, company_id: str, document_id: UUID) -> Optional[dict]:
     result = (
         await session.execute(

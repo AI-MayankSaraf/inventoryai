@@ -15,6 +15,7 @@ import {
 
 import { AsyncBoundary, FormError, LoadingCard } from "@/components/common/async-state";
 import { AuditTrail } from "@/components/common/audit-trail";
+import { SourceDocumentsCard } from "@/components/documents/source-documents-card";
 import { ConfirmButton } from "@/components/common/confirm-dialog";
 import { DetailGrid, DetailRow } from "@/components/common/detail-row";
 import { PageHeader } from "@/components/common/page-header";
@@ -326,6 +327,8 @@ export function SupplierInvoiceDetailScreen({ id }: { id: Id }) {
                   />
                 </div>
               </div>
+
+              <SourceDocumentsCard linkedType="supplier_invoice" linkedId={invoice.id} />
 
               <AuditTrail entityType="supplier_invoice" entityId={invoice.id} />
 

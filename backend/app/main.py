@@ -8,6 +8,8 @@ catalog). Also home to the RLS safety check described in
 a single request.
 """
 
+import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 
 import anyio.to_thread
@@ -33,6 +35,7 @@ from app.modules.auth.router import router as auth_router
 from app.modules.auth.users_router import router as users_router
 from app.modules.catalog.detail_router import router as catalog_detail_router
 from app.modules.catalog.router import router as catalog_router
+from app.modules.ai import worker as extraction_worker
 from app.modules.ai.router import router as ai_router
 from app.modules.supplier_portal.router import router as supplier_portal_router
 from app.modules.documents.router import router as documents_router
@@ -118,8 +121,20 @@ async def assert_app_role_is_rls_bound() -> None:
         )
 
 
+class InsecureConfigurationError(RuntimeError):
+    pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Weak secrets or DEBUG outside development: refuse to serve at all.
+    problems = settings.production_problems()
+    if problems:
+        raise InsecureConfigurationError(
+            f"ENVIRONMENT={settings.environment} is not development, and this configuration is not safe to run:\n"
+            + "\n".join(f"  - {p}" for p in problems)
+            + "\n\nGenerate secrets with:  python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+        )
     # Fail fast on boot if the DB is unreachable, rather than on first request.
     async with engine.connect() as conn:
         await conn.execute(text("SELECT 1"))
@@ -130,7 +145,16 @@ async def lifespan(app: FastAPI):
     # first time somebody uploads a supplier's invoice. Checked with
     # HeadBucket, which needs no write and creates nothing.
     await anyio.to_thread.run_sync(storage.assert_ready)
+    # Uploaded documents are read by a worker; unless a separate worker
+    # process does it (EXTRACTION_WORKER=external), this process runs one.
+    worker_task = None
+    if settings.extraction_worker == "embedded":
+        worker_task = asyncio.create_task(extraction_worker.run_forever(), name="extraction-worker")
     yield
+    if worker_task is not None:
+        worker_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await worker_task
     await engine.dispose()
 
 

@@ -169,4 +169,5 @@ async function optionTexts(page, trigger) {
     await browser.close();
   }
   console.log(`\n${passed} passed, ${failed.length} failed`, failed);
+  process.exit(failed.length ? 1 : 0);
 })();

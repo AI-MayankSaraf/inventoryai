@@ -146,3 +146,6 @@ check("K1 5 wrong passwords lock the account (429)", s == 429, (s, r))
 s, aud = api("GET", "/audit-logs?limit=50", tok=owner)
 check("K2 grants and revokes are in the audit trail", sum(1 for a in items(aud) if a.get("entity_type") == "supplier_portal_access") >= 2, "")
 print(f"\n{passed} passed, {len(failed)} failed", failed)
+
+import sys
+sys.exit(1 if failed else 0)

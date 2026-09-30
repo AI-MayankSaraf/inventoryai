@@ -38,13 +38,41 @@ The Python tests use the backend's virtualenv (they need `openpyxl` and
 
 ## Running
 
+Everything, one suite at a time, with a summary and each suite's full output
+in `tests/logs/`:
+
 ```bash
 # from the repository root
+backend/.venv/Scripts/python.exe tests/run_all.py
+backend/.venv/Scripts/python.exe tests/run_all.py --only api,backend   # no browser
+backend/.venv/Scripts/python.exe tests/run_all.py --skip ai            # no Ollama here
+backend/.venv/Scripts/python.exe tests/run_all.py e2e_auth browser_roles
+backend/.venv/Scripts/python.exe tests/run_all.py --list
+```
+
+The runner also includes the backend's own suites (`backend/scripts/e2e_*`,
+`verify_rls`, `verify_s3`, `verify_security_config`). Run suites one at a
+time, never two at once: several sign sessions out or change settings, which
+makes a parallel suite fail for no reason in the code.
+
+One suite on its own:
+
+```bash
 backend/.venv/Scripts/python.exe tests/api_business_flow.py
 node tests/browser_screen_walk.js
 ```
 
-Every test prints `ok` / `FAIL` per check and a `N passed, M failed` line.
+Every test prints `ok` / `FAIL` per check and a `N passed, M failed` line,
+and exits non-zero when anything failed.
+
+The suites make many failed sign-ins on purpose, and the API limits failed
+sign-ins per address (`RATE_LIMIT_*` in `backend/.env.example`). Several full
+runs within 15 minutes can use that up and fail with 429. Restart the API
+(the counters are in memory) or set `RATE_LIMIT_ENABLED=false` in
+`backend/.env` on a machine used only for testing.
+
+CI (`.github/workflows/ci.yml`) runs the same runner against the Docker
+images on every push and pull request, without an AI provider (`--skip ai`).
 
 ## Settings
 

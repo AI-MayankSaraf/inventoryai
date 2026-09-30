@@ -17,6 +17,7 @@ import {
 
 import { AsyncBoundary, FormError, LoadingCard } from "@/components/common/async-state";
 import { AuditTrail } from "@/components/common/audit-trail";
+import { SourceDocumentsCard } from "@/components/documents/source-documents-card";
 import { ConfirmButton } from "@/components/common/confirm-dialog";
 import { DetailGrid, DetailRow } from "@/components/common/detail-row";
 import { PageHeader } from "@/components/common/page-header";
@@ -448,6 +449,8 @@ export function ProformaDetailScreen({ id }: { id: Id }) {
                   </SectionCard>
                 </div>
               </div>
+
+              <SourceDocumentsCard linkedType="proforma_invoice" linkedId={proforma.id} />
 
               <AuditTrail entityType="proforma_invoice" entityId={proforma.id} />
 

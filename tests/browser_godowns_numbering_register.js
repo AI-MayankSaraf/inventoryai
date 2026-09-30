@@ -101,4 +101,5 @@ async function pick(page, trigger, text) {
     await browser.close();
   }
   console.log(`\n${passed} passed, ${failed.length} failed`, failed);
+  process.exit(failed.length ? 1 : 0);
 })();

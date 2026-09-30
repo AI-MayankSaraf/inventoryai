@@ -93,10 +93,12 @@ async function api(method, path, token, body) {
       mimeType: "text/csv",
       buffer: Buffer.from(csv),
     });
-    // Uploading redirects to the review screen once the server has read it.
+    // Uploading goes straight to the review screen, which shows the worker's
+    // progress and then the extraction once the file has been read.
     await page.waitForURL(/\/ai-documents\/review\//, { timeout: 40000 });
     const documentId = page.url().split("/review/")[1];
     check("D01 dropping a file in the page uploads and lands on review", !!documentId, page.url());
+    await page.waitForSelector("text=/Approve and create quotation/i", { timeout: 90000 });
 
     const [, doc] = await api("GET", `/ai/documents/${documentId}`, token);
     check("D02 the server read it: three items, not zero", doc.items_found === 3, doc);

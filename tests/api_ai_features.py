@@ -35,6 +35,17 @@ def req(m, p, tok=None, body=None, raw=None, ct=None):
         return e.code, e.read()[:300].decode(errors="replace")
 
 
+
+def wait_for_document(tok, document_id, timeout=180):
+    """Uploads are read by a background worker; wait until it has finished."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        s, job = req("GET", f"/ai/documents/{document_id}/job", tok)
+        if s != 200 or job.get("processing_status") not in ("queued", "processing"):
+            return job
+        time.sleep(0.5)
+    return job
+
 def upload(path, tok, name, content, fields=None):
     bd = "----x" + uuid.uuid4().hex
     parts = [f'--{bd}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode() for k, v in (fields or {}).items()]
@@ -69,6 +80,8 @@ sup = (sup.get("items", sup) if isinstance(sup, dict) else sup)[0]
 csv = f"{sup['name']}\nQUOTATION\nQuotation No: QK-{T}\n\nS.No,Description,Qty,Unit,Rate\n1,Circuit breaker 32 amp 2 pole,10,Nos,410\n".encode()
 s, up = upload("/ai/documents", tok, f"qk-{T}.csv", csv)
 check("Q5 quotation upload (S3) works", s == 201, up)
+if s == 201:
+    wait_for_document(tok, up["document"]["id"])
 docs = req("GET", "/ai/documents?limit=1", tok)[1]
 doc = (docs.get("items", docs) if isinstance(docs, dict) else docs)[0]
 s, ex = req("GET", f"/ai/documents/{doc['id']}/extraction", tok)
@@ -79,3 +92,6 @@ check("Q6 semantic match: 'circuit breaker 32 amp 2 pole' -> Havells MCB 32A", c
 s, a = req("POST", "/ai/assistant", tok, {"question": "what is out of stock?"})
 check("Q7 assistant answers from the database", s == 200 and a.get("intent") not in (None, "unknown"), a)
 print(f"\n{passed} passed, {len(failed)} failed", failed)
+
+import sys
+sys.exit(1 if failed else 0)

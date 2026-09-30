@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, type-check, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Backend compiles
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          python -m compileall -q app scripts ../tests
+      - name: Security configuration checks
+        working-directory: backend
+        run: python -m scripts.verify_security_config
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Frontend lint, types, build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npx tsc --noEmit
+          npm run build
+
+  e2e:
+    name: End-to-end (Docker images)
+    runs-on: ubuntu-latest
+    needs: checks
+    timeout-minutes: 45
+    env:
+      COMPOSE: docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write the stack's .env
+        run: |
+          gen() { python3 -c "import secrets; print(secrets.token_urlsafe(32))"; }
+          OWNER=$(gen); APP=$(gen); PLATFORM=$(gen)
+          cat > .env <<EOF
+          OWNER_DB_PASSWORD=$OWNER
+          APP_DB_PASSWORD=$APP
+          PLATFORM_DB_PASSWORD=$PLATFORM
+          JWT_SECRET=$(gen)$(gen)
+          SECRETS_KEY=$(gen)$(gen)
+          DEBUG=false
+          S3_BUCKET=inventoryai-documents
+          EMAIL_FROM=no-reply@inventoryai.local
+          AI_PROVIDER=none
+          EOF
+          sed -i 's/^ *//' .env
+          # The test runner connects to the same database from the host.
+          {
+            echo "DATABASE_URL=postgresql+asyncpg://inventoryai:$OWNER@localhost:5432/inventoryai"
+            echo "APP_DATABASE_URL=postgresql+asyncpg://inventoryai_app:$APP@localhost:5432/inventoryai"
+            echo "PLATFORM_DATABASE_URL=postgresql+asyncpg://inventoryai_platform:$PLATFORM@localhost:5432/inventoryai"
+            echo "TEST_DATABASE_URL=postgresql://inventoryai:$OWNER@localhost:5432/inventoryai"
+            echo "TEST_PLATFORM_DATABASE_URL=postgresql://inventoryai_platform:$PLATFORM@localhost:5432/inventoryai"
+          } >> "$GITHUB_ENV"
+
+      - name: Build and start the stack
+        run: |
+          $COMPOSE up -d --build
+          for i in $(seq 1 60); do
+            curl -fsS http://localhost:8000/health && break
+            sleep 5
+          done
+          $COMPOSE ps -a
+          curl -fsS http://localhost:8000/health > /dev/null
+          for i in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:3000/login && break; sleep 2; done
+
+      - name: Demo data for the suites
+        run: $COMPOSE exec -T backend python -m app.db.seed --demo
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r backend/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+      - name: Playwright
+        working-directory: tests
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run every suite
+        env:
+          ENVIRONMENT: test
+          S3_BUCKET: inventoryai-documents
+          AWS_ENDPOINT_URL: http://localhost:4566
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          EMAIL_PROVIDER: smtp
+          SMTP_HOST: localhost
+          SMTP_PORT: "1025"
+          SMTP_USE_TLS: "false"
+          OCR_PROVIDER: tesseract
+        # No AI provider in CI: the suite that needs one is skipped; every
+        # other suite covers the no-provider path.
+        run: python tests/run_all.py --skip ai
+
+      - name: Stack logs
+        if: failure()
+        run: $COMPOSE logs --no-color > stack.log 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-logs
+          path: |
+            tests/logs/
+            stack.log

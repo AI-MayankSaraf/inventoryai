@@ -16,3 +16,6 @@ frontend/tsconfig.tsbuildinfo
 .DS_Store
 Thumbs.db
 *.log
+
+# Test runner output
+tests/logs/

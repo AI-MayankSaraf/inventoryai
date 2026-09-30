@@ -229,7 +229,7 @@ def main() -> int:  # noqa: C901 - a boundary suite is a long list of cases
     st, b = call("POST", "/platform/companies", admin, {**body, "name": f"{name} III", "state_code": "ZZ"})
     check("O11 a bad state code is refused", st == 400, (st, b))
     st, b = call("POST", "/platform/companies", admin, {**body, "name": f"{name} IV", "plan": "Platinum"})
-    check("O12 …and an invented plan", st == 400, (st, b))
+    check("O12 …and an invented plan", st == 422, (st, b))
     st, b = call("POST", "/platform/companies", admin, {**body, "name": f"{name} V", "owner_email": "not-an-email"})
     check("O13 …and a malformed owner email", st == 400, (st, b))
     check("O14 none of those left a half-built tenant",
@@ -264,7 +264,7 @@ def main() -> int:  # noqa: C901 - a boundary suite is a long list of cases
     st, b = call("PATCH", f"/platform/companies/{new_id}", admin, {"plan": "Growth", "city": "Mysuru"})
     check("E01 plan and city update", st == 200 and b["plan"] == "Growth" and b["city"] == "Mysuru", b)
     st, b = call("PATCH", f"/platform/companies/{new_id}", admin, {"plan": "Platinum"})
-    check("E02 an invented plan is refused", st == 400, (st, b))
+    check("E02 an invented plan is refused", st == 422, (st, b))
     st, b = call("PATCH", f"/platform/companies/{new_id}", admin, {"name": " "})
     check("E03 …and a blank name", st == 400, (st, b))
     st, b = call("PATCH", f"/platform/companies/{new_id}", admin, {"gstin": GSTIN})

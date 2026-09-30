@@ -11,8 +11,12 @@ import { DocumentTable } from "@/components/documents/document-table";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card } from "@/components/ui/card";
 import { useListControls } from "@/hooks/use-api";
-import { useDocuments, useUploadDocument } from "@/hooks/use-documents";
-import { documentsApi } from "@/lib/api";
+import {
+  useDeleteDocument,
+  useDocuments,
+  useRetryExtraction,
+  useUploadDocument,
+} from "@/hooks/use-documents";
 
 export default function AiDocumentsPage() {
   const router = useRouter();
@@ -22,10 +26,12 @@ export default function AiDocumentsPage() {
   const upload = useUploadDocument((result) => {
     router.push(`/ai-documents/review/${result.document.id}`);
   });
+  const retry = useRetryExtraction(state.refresh);
+  const remove = useDeleteDocument(state.refresh);
 
   async function handleFiles(files: File[]) {
-    // The bytes go to the server, which parses them, works out the document
-    // type and supplier, and reads the lines before this call returns.
+    // The server stores the file and queues it; a background worker reads
+    // it. The review screen shows its progress.
     for (const file of files) {
       await upload.run({ file });
     }
@@ -44,7 +50,7 @@ export default function AiDocumentsPage() {
 
       <Card className="p-4">
         <DocumentDropzone onFiles={handleFiles} />
-        <FormError message={upload.error} className="mt-3" />
+        <FormError message={upload.error ?? retry.error ?? remove.error} className="mt-3" />
         {upload.data?.duplicateOf && (
           <p className="mt-3 rounded-lg border border-border bg-muted/50 px-3 py-2 text-body text-muted-foreground">
             This file has the same content as{" "}
@@ -59,9 +65,9 @@ export default function AiDocumentsPage() {
       <Alert variant="ai">
         <Info />
         <AlertDescription>
-          The file is read on the server the moment you upload it: the document type, the supplier,
-          the header fields and every line are extracted, and each line is matched against your own
-          catalogue. Nothing enters your inventory or purchase records until you review and approve
+          The file is read on the server right after you upload it — usually within seconds, a
+          minute for a long scanned PDF: the document type, the supplier, the header fields and every
+          line are extracted, and each line is matched against your own catalogue. Nothing enters your inventory or purchase records until you review and approve
           it — and the totals are recalculated from the lines you approve, never taken from the
           printed page.
         </AlertDescription>
@@ -80,7 +86,10 @@ export default function AiDocumentsPage() {
             <DocumentTable
               documents={data.items}
               onRetry={(documentId) => {
-                void documentsApi.retryExtraction(documentId);
+                void retry.run(documentId);
+              }}
+              onDelete={async (documentId) => {
+                await remove.run(documentId);
               }}
             />
           )}

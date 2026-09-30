@@ -27,8 +27,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DocumentReading } from "@/components/documents/document-reading";
 import { useProducts } from "@/hooks/use-catalog";
 import {
+  isBeingRead,
+  useDocumentJobStatus,
   useApproveExtraction,
   useConfirmLineMatch,
   useCorrectExtractedField,
@@ -58,7 +61,12 @@ import type { Provenance } from "@/types";
 
 export function ExtractionReview({ documentId }: { documentId: string }) {
   const router = useRouter();
-  const state = useExtraction(documentId);
+  // The worker reads the document after the upload returns: follow its job
+  // and ask for the extraction only once there is one to show.
+  const job = useDocumentJobStatus(documentId);
+  const jobStatus = job.data?.processingStatus;
+  const ready = jobStatus !== undefined && !isBeingRead(jobStatus) && jobStatus !== "failed";
+  const state = useExtraction(documentId, { enabled: ready });
   const products = useProducts({ limit: 500, sort: "name" });
 
   const [saveAlias, setSaveAlias] = React.useState<Record<string, boolean>>({});
@@ -78,6 +86,14 @@ export function ExtractionReview({ documentId }: { documentId: string }) {
     router.push(`/procurement/quotations/${result.promotedToId}`);
   });
   const reject = useRejectExtraction(() => router.push("/ai-documents"));
+
+  if (!ready) {
+    return (
+      <AsyncBoundary state={job}>
+        {(current) => <DocumentReading job={current} onRetried={job.refresh} />}
+      </AsyncBoundary>
+    );
+  }
 
   return (
     <AsyncBoundary state={state}>

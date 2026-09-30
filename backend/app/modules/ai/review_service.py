@@ -660,6 +660,15 @@ async def approve(
         text("UPDATE ai_extraction_results SET promoted_to_id = :pid WHERE company_id = :c AND id = :id"),
         {"pid": promoted_id, "c": claims.company_id, "id": result["id"]},
     )
+    # The record points back at the file it was read from: its screen shows
+    # "Source document", and the file can no longer be deleted (BR-DOC-04).
+    await session.execute(
+        text(
+            "INSERT INTO document_links (id, company_id, document_id, linked_type, linked_id, link_role, linked_by) "
+            "VALUES (gen_random_uuid(), :c, :d, :t, :pid, 'source', :u) ON CONFLICT DO NOTHING"
+        ),
+        {"c": claims.company_id, "d": document_id, "t": target, "pid": promoted_id, "u": claims.user_id},
+    )
     return {
         "extraction_result_id": result["id"],
         "promoted_to_type": target,

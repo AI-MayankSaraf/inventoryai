@@ -182,23 +182,23 @@ async def store_document(
     return document_id, key
 
 
-async def run_pipeline(
+async def enqueue(
     session: AsyncSession, *, company_id: str, user_id: str, document_id: UUID, attempt: int = 1
 ) -> UUID:
-    """Parse → classify → map → extract → match. Returns the job id.
+    """Queue the document for reading. Returns the job id.
 
-    Failures are recorded on the job *and* the document and then returned
-    normally: a supplier sending an unreadable file is an ordinary event in
-    this system, not a 500.
+    Only writes two rows, so an upload returns as soon as the file is
+    stored; a worker (`app/modules/ai/worker.py`) picks the job up after
+    the caller commits. Reading a scanned 20 MB PDF takes a minute, and a
+    request is the wrong place to spend it.
     """
-    started = time.monotonic()
     job_id = uuid4()
     await session.execute(
         text(
             "INSERT INTO ai_processing_jobs (id, company_id, document_id, job_type, status, stage, "
-            " progress, provider, prompt_name, prompt_version, attempt, started_at, triggered_by) "
-            "VALUES (:id, :c, :d, 'extraction', 'running', 'Parsing', 10, :prov, 'extract_purchase_document', "
-            " :ver, :attempt, now(), :user)"
+            " progress, provider, prompt_name, prompt_version, attempt, triggered_by) "
+            "VALUES (:id, :c, :d, 'extraction', 'queued', 'Queued', 0, :prov, 'extract_purchase_document', "
+            " :ver, :attempt, :user)"
         ),
         {
             "id": job_id,
@@ -207,9 +207,43 @@ async def run_pipeline(
             "prov": get_settings().ai_provider,
             "ver": PROMPT_VERSION,
             "attempt": attempt,
-        }
-        | {"user": user_id},
+            "user": user_id,
+        },
     )
+    await session.execute(
+        text(
+            "UPDATE documents SET processing_status = 'queued', processing_stage = 'Queued', "
+            " processing_progress = 0, error_code = NULL, error_message = NULL "
+            "WHERE company_id = :c AND id = :id"
+        ),
+        {"c": company_id, "id": document_id},
+    )
+    return job_id
+
+
+async def process_job(session: AsyncSession, *, company_id: str, job_id: UUID) -> None:
+    """Parse → classify → map → extract → match, for a job a worker has
+    claimed. `session` is scoped to the job's tenant; the caller commits.
+
+    Failures are recorded on the job *and* the document and then returned
+    normally: a supplier sending an unreadable file is an ordinary event in
+    this system, not a crash, and retrying it would not make it readable.
+    """
+    started = time.monotonic()
+    document_id = (
+        await session.execute(
+            text("SELECT document_id FROM ai_processing_jobs WHERE company_id = :c AND id = :id"),
+            {"c": company_id, "id": job_id},
+        )
+    ).scalar_one()
+    await session.execute(
+        text(
+            "UPDATE ai_processing_jobs SET status = 'running', stage = 'Parsing', progress = 10, "
+            " started_at = COALESCE(started_at, now()) WHERE company_id = :c AND id = :id"
+        ),
+        {"c": company_id, "id": job_id},
+    )
+    await _progress(session, company_id, document_id, job_id, "Parsing", 10)
 
     document = (
         await session.execute(
@@ -481,12 +515,12 @@ async def run_pipeline(
         )
         await savepoint.commit()
         await _finish_job(session, company_id, job_id, "succeeded", started, trace)
-        return job_id
+        return
 
     except (UnsupportedFile, PipelineError, providers.ProviderNotConfigured, providers.ProviderError) as exc:
         code = getattr(exc, "code", "PIPELINE_FAILED")
         await _fail(session, company_id, document_id, job_id, code, str(exc), started, trace, savepoint)
-        return job_id
+        return
     except Exception as exc:  # noqa: BLE001 — a parser crash must not 500 the upload
         await _fail(
             session,
@@ -499,7 +533,82 @@ async def run_pipeline(
             trace,
             savepoint,
         )
-        return job_id
+        return
+
+
+class DocumentInUse(Exception):
+    """The document backs a business record and must be kept (BR-DOC-04)."""
+
+    def __init__(self, uses: list[str]):
+        super().__init__(", ".join(uses))
+        self.uses = uses
+
+
+class DocumentBusy(Exception):
+    """A worker is reading the document right now."""
+
+
+async def delete_document(session: AsyncSession, *, company_id: str, document_id: UUID) -> Optional[dict]:
+    """Delete an uploaded document that nothing was made from.
+
+    The rule (BR-DOC-04): a document that became a business record — a
+    quotation, proforma or invoice, a product image, a logo — is part of
+    that record's evidence and is kept; deleting it is refused with the
+    records that use it named. Anything else (a wrong upload, a rejected
+    or never-reviewed extraction) can go, together with its AI results and
+    jobs (they cascade). Returns the deleted row's summary, or None if there
+    was no such document; the caller commits and then removes the S3
+    object, so a failed commit never leaves a row pointing at nothing.
+    """
+    document = (
+        await session.execute(
+            text(
+                "SELECT id, original_filename, storage_key, sha256_hash, processing_status, document_type "
+                "FROM documents WHERE company_id = :c AND id = :id FOR UPDATE"
+            ),
+            {"c": company_id, "id": document_id},
+        )
+    ).mappings().first()
+    if document is None:
+        return None
+    if document["processing_status"] in ("queued", "processing"):
+        raise DocumentBusy()
+
+    uses = [
+        f"{row[0].replace('_', ' ')}"
+        for row in (
+            await session.execute(
+                text(
+                    "SELECT linked_type FROM document_links WHERE company_id = :c AND document_id = :id "
+                    "UNION ALL SELECT 'supplier_quotation' FROM supplier_quotations WHERE company_id = :c AND document_id = :id "
+                    "UNION ALL SELECT 'proforma_invoice' FROM proforma_invoices WHERE company_id = :c AND document_id = :id "
+                    "UNION ALL SELECT 'supplier_invoice' FROM supplier_invoices WHERE company_id = :c AND document_id = :id "
+                    "UNION ALL SELECT 'product_image' FROM product_images WHERE company_id = :c AND document_id = :id "
+                    "UNION ALL SELECT 'company_logo' FROM companies WHERE id = :c AND logo_document_id = :id "
+                    "UNION ALL SELECT 'profile_picture' FROM users WHERE avatar_document_id = :id "
+                    "UNION ALL SELECT 'approved_extraction' FROM ai_extraction_results "
+                    "  WHERE company_id = :c AND document_id = :id AND review_status = 'approved'"
+                ),
+                {"c": company_id, "id": document_id},
+            )
+        ).all()
+    ]
+    if uses:
+        raise DocumentInUse(sorted(set(uses)))
+
+    # Schema mappings keep their rules; they just lose the sample file.
+    await session.execute(
+        text(
+            "UPDATE document_schema_mappings SET sample_document_id = NULL "
+            "WHERE company_id = :c AND sample_document_id = :id"
+        ),
+        {"c": company_id, "id": document_id},
+    )
+    await session.execute(
+        text("DELETE FROM documents WHERE company_id = :c AND id = :id"),
+        {"c": company_id, "id": document_id},
+    )
+    return dict(document)
 
 
 # ================================================================ internals

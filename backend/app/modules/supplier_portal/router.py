@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_platform_session
 from app.core.deps import require_permission
 from app.core.errors import CODE_UNAUTHENTICATED, ApiError
+from app.core import rate_limit
 from app.core.security import AccessTokenClaims
 from app.modules.auth.users_router import _deliver_queued_email
 from app.modules.supplier_portal import service
@@ -137,7 +138,14 @@ async def portal_account(
 
 @router.post("/supplier-portal/login", response_model=PortalTokenOut)
 async def portal_login(body: PortalLoginIn, request: Request, session: AsyncSession = Depends(get_platform_session)):
-    return await service.login(session, email=body.email, password=body.password, request=request)
+    rate_limit.refuse_if_exhausted(request, "supplier_login", account=body.email)
+    try:
+        return await service.login(session, email=body.email, password=body.password, request=request)
+    except ApiError as exc:
+        # Wrong password (401) or a locked account (429): count the failure.
+        if exc.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_429_TOO_MANY_REQUESTS):
+            rate_limit.record_failure(request, "supplier_login", account=body.email)
+        raise
 
 
 @router.post("/supplier-portal/set-password", status_code=status.HTTP_204_NO_CONTENT)

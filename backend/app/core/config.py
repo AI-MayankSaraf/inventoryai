@@ -1,16 +1,22 @@
 """
 Application settings, loaded from environment variables / .env.
 
-Auth secrets, email, the AI pipeline and S3 object storage are all read
-from here. Redis and Celery remain declared-but-unread placeholders: the
-background worker and the mapping cache are documented future work, not
-something this build depends on.
+Auth secrets, email, the AI pipeline, the extraction worker and S3 object
+storage are all read from here. Redis remains a declared-but-unread
+placeholder: the mapping cache is documented future work, not something
+this build depends on. (The worker queue is a Postgres table.)
 """
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+#: Signs tokens on a development machine only; `production_problems()`
+#: refuses to start anywhere else while it is in use.
+DEV_JWT_SECRET = "dev-secret-change-me"
+#: 32 random bytes is what HS256 needs to be unguessable.
+MIN_SECRET_LENGTH = 32
 
 
 class Settings(BaseSettings):
@@ -41,19 +47,56 @@ class Settings(BaseSettings):
     )
     database_echo: bool = Field(default=False)
 
-    jwt_secret: str = Field(default="dev-secret-change-me")
+    jwt_secret: str = Field(default=DEV_JWT_SECRET)
     # Key for encrypting secrets at rest (currently per-company SMTP
     # passwords, via pgcrypto). Falls back to `jwt_secret` so a dev install
     # works unconfigured; set it explicitly in production, and note that
     # rotating it makes previously stored secrets unreadable.
     secrets_key: str = Field(default="")
     jwt_access_ttl_minutes: int = Field(default=15)
+
+    @field_validator("jwt_secret", mode="before")
+    @classmethod
+    def _blank_secret_is_the_dev_default(cls, value: object) -> object:
+        # `JWT_SECRET=` in .env is an empty string, not "unset" — and an
+        # empty HMAC key signs tokens anyone can forge.
+        if isinstance(value, str):
+            return value.strip() or DEV_JWT_SECRET
+        return value
     jwt_refresh_ttl_days: int = Field(default=30)
 
     # BR-AUTH-03: "5 failed attempts → 15-minute lock on the account."
     # Configurable, but these are the documented defaults.
     login_max_failed_attempts: int = Field(default=5)
     login_lockout_minutes: int = Field(default=15)
+
+    # Per-client request limits (app/core/rate_limit.py), on top of the
+    # account lockout above. Written as "<count>/<window>", e.g. "10/1m",
+    # "30/15m", "100/1h". `_account` limits count one client and one email
+    # address together. Sign-in and reset-password limits count FAILED
+    # attempts only, so many people signing in from one office address are
+    # never throttled; forgot-password counts every request (each one sends
+    # an email).
+    rate_limit_enabled: bool = Field(default=True)
+    rate_limit_login: str = Field(default="30/15m")
+    rate_limit_login_account: str = Field(default="10/15m")
+    rate_limit_forgot_password: str = Field(default="30/15m")
+    rate_limit_forgot_password_account: str = Field(default="5/15m")
+    rate_limit_reset_password: str = Field(default="30/15m")
+    rate_limit_supplier_login: str = Field(default="30/15m")
+    rate_limit_supplier_login_account: str = Field(default="10/15m")
+
+    @field_validator(
+        "rate_limit_login", "rate_limit_login_account", "rate_limit_forgot_password",
+        "rate_limit_forgot_password_account", "rate_limit_reset_password",
+        "rate_limit_supplier_login", "rate_limit_supplier_login_account",
+    )
+    @classmethod
+    def _rate_limit_parses(cls, value: str) -> str:
+        from app.core.rate_limit import Rule  # imports this module
+
+        Rule.parse(value)  # a typo fails at startup, not on the first sign-in
+        return value
 
     # Email. `console` prints the message and records it as sent — the
     # development default, so invitations work with no mail server. `smtp`
@@ -127,6 +170,25 @@ class Settings(BaseSettings):
     #: Pages read from one scanned PDF (each page takes a few seconds).
     ocr_max_pages: int = Field(default=10)
 
+    #: Where uploaded documents are read (app/modules/ai/worker.py).
+    #: `embedded`: a worker loop inside each API process — nothing else to
+    #: run. `external`: the API only queues; run `python -m app.worker`
+    #: (the Docker `worker` service) so OCR never competes with requests.
+    extraction_worker: str = Field(default="embedded")
+    #: Seconds an idle worker waits before looking at the queue again.
+    worker_poll_seconds: float = Field(default=2.0)
+    #: A job running longer than this is presumed abandoned by a dead worker.
+    worker_stale_after_minutes: int = Field(default=15)
+    #: Times a job is put back after its worker died before it is given up.
+    worker_max_retries: int = Field(default=3)
+
+    @field_validator("extraction_worker")
+    @classmethod
+    def _known_worker_mode(cls, value: str) -> str:
+        if value not in {"embedded", "external"}:
+            raise ValueError("EXTRACTION_WORKER must be 'embedded' or 'external'")
+        return value
+
     #: A trigram match at or above this is worth showing as a candidate.
     #: Below it the row is noise (08_AI_DATA_MODEL.md §4.3 rung 5).
     ai_trigram_floor: float = Field(default=0.28)
@@ -184,6 +246,26 @@ class Settings(BaseSettings):
     @property
     def is_development(self) -> bool:
         return self.environment.lower() in {"development", "dev", "local", "test"}
+
+    def production_problems(self) -> list[str]:
+        """What makes this configuration unsafe to serve real users with.
+        Empty in development, where the defaults are deliberate."""
+        if self.is_development:
+            return []
+        problems = []
+        if self.jwt_secret == DEV_JWT_SECRET or len(self.jwt_secret) < MIN_SECRET_LENGTH:
+            problems.append(
+                f"JWT_SECRET is the development default or shorter than {MIN_SECRET_LENGTH} characters, "
+                "so anyone could forge a sign-in token."
+            )
+        if len(self.secrets_key) < MIN_SECRET_LENGTH or self.secrets_key == self.jwt_secret:
+            problems.append(
+                f"SECRETS_KEY must be set to its own value of at least {MIN_SECRET_LENGTH} characters "
+                "(it encrypts stored SMTP passwords; it must not be the JWT secret)."
+            )
+        if self.debug:
+            problems.append("DEBUG is on, which sends Python tracebacks to API callers. Set DEBUG=false.")
+        return problems
 
 
 @lru_cache

@@ -1,0 +1,23 @@
+# CI only, on top of docker-compose.yml + docker-compose.local.yml:
+# ENVIRONMENT=test (the suites read invitation links from API responses,
+# which only happens outside production) and the database, S3 stand-in and
+# mail catcher published on localhost for the test runner.
+services:
+  db:
+    ports:
+      - "127.0.0.1:5432:5432"
+  s3:
+    ports:
+      - "127.0.0.1:4566:4566"
+  mail:
+    ports:
+      - "127.0.0.1:1025:1025"
+  migrate:
+    environment:
+      ENVIRONMENT: test
+  backend:
+    environment:
+      ENVIRONMENT: test
+  worker:
+    environment:
+      ENVIRONMENT: test

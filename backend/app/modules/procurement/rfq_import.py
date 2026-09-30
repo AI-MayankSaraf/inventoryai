@@ -168,7 +168,8 @@ _UNIT_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 _TOTAL_ROW = re.compile(r"^(grand\s*)?(sub\s*)?total\b|^net\s+total\b", re.IGNORECASE)
-_NUMBER_WITH_UNIT = re.compile(r"^\s*([0-9][0-9,]*(?:\.[0-9]+)?|\.[0-9]+)\s*([A-Za-z][A-Za-z .]*)?\s*$")
+# The sign is accepted so "-5" is reported as "must be more than zero", not "not a number".
+_NUMBER_WITH_UNIT = re.compile(r"^\s*(-?(?:[0-9][0-9,]*(?:\.[0-9]+)?|\.[0-9]+))\s*([A-Za-z][A-Za-z .]*)?\s*$")
 _BRACKET = re.compile(r"[\(\[]([^\)\]]*)[\)\]]")
 
 
@@ -503,7 +504,8 @@ def _widest_row(grid: list[list[str]]) -> int:
     if widest == 0:
         return 0
     need = max(2, int(widest * 0.6 + 0.5))
-    return next(i for i, r in enumerate(top) if sum(1 for c in r if c) >= need)
+    # A single-column file has no row that wide; its first row is the heading.
+    return next((i for i, r in enumerate(top) if sum(1 for c in r if c) >= need), 0)
 
 
 #: RFQ field -> the generic role `column_assist` understands.

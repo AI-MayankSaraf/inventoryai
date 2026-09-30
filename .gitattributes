@@ -1,0 +1,3 @@
+# Files executed inside Linux containers keep Unix line endings on every OS.
+*.sh        text eol=lf
+Dockerfile  text eol=lf

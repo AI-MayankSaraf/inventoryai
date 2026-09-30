@@ -5,12 +5,10 @@
  * a model, simulates a progress bar, or computes a financial value — and
  * the three facts behind that are worth stating where the calls are made:
  *
- *  - **Extraction happens on the server, inside the upload request.** There
- *    is no queue in this installation, so by the time `uploadDocument`
- *    resolves the document has already been read. The job endpoint still
- *    exists and still reports real stages and timings; it just has nothing
- *    left to wait for. (The old build advanced a fake progress bar on a
- *    timer; that is gone.)
+ *  - **Extraction happens on the server, in a background worker.**
+ *    `uploadDocument` resolves once the file is stored and queued
+ *    (`processingStatus: "queued"`); the job endpoint then reports the
+ *    worker's real stages and progress until the document is read.
  *  - **An extraction is not a business document.** Approving one promotes
  *    it into a quotation, proforma or invoice, server-side, and records who
  *    did it (BR-AI-01).
@@ -293,8 +291,45 @@ export async function retryExtraction(documentId: Id): Promise<DocumentJobStatus
   return toJobStatus(await httpPost<JobOut>(`/ai/documents/${documentId}/retry`, {}));
 }
 
+/** Only a document nothing was made from can be deleted; one behind a
+ * quotation, proforma or invoice is refused (409) and kept as its evidence. */
 export async function deleteDocument(documentId: Id): Promise<void> {
   await httpDelete(`/ai/documents/${documentId}`);
+}
+
+/** A 5-minute signed link to the original file, to open in a new tab. */
+export async function getDownloadLink(documentId: Id): Promise<string> {
+  return (await httpGet<{ url: string }>(`/ai/documents/${documentId}/download-link`)).url;
+}
+
+export type LinkedRecordType = "supplier_quotation" | "proforma_invoice" | "supplier_invoice";
+
+export interface SourceDocument {
+  id: Id;
+  originalFilename: string;
+  mimeType: string | null;
+  fileSizeBytes: number | null;
+  uploadedAt: string | null;
+}
+
+/** The uploaded files a business record was made from. */
+export async function getSourceDocuments(linkedType: LinkedRecordType, linkedId: Id): Promise<SourceDocument[]> {
+  const rows = await httpGet<
+    {
+      id: Id;
+      original_filename: string;
+      mime_type: string | null;
+      file_size_bytes: number | null;
+      uploaded_at: string | null;
+    }[]
+  >(`/ai/sources/${linkedType}/${linkedId}`);
+  return rows.map((r) => ({
+    id: r.id,
+    originalFilename: r.original_filename,
+    mimeType: r.mime_type,
+    fileSizeBytes: r.file_size_bytes,
+    uploadedAt: r.uploaded_at,
+  }));
 }
 
 /* ------------------------------------------------------------ Extraction */

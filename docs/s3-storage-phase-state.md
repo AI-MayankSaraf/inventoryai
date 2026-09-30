@@ -130,13 +130,17 @@ yet run rather than assumed.
 
 ## Still open
 
-* **No document delete endpoint.** `document.delete` is seeded and granted
+* ~~**No document delete endpoint.**~~ **Closed** — `DELETE /ai/documents/{id}`,
+  rule in 06_BUSINESS_RULES.md BR-DOC-04. Original note: `document.delete` is seeded and granted
   to Owner and Purchase Manager, and no route uses it, so BR-DOC-04
   ("deleting a document never deletes the business record it produced") has
   nothing to govern. Building it means deciding what deletion means for a
   document that has already been approved into an invoice — a business
   rule, not a storage detail, so it is not being invented here.
-* **`document_links` is still never written.** The table exists; no code
+* ~~**`document_links` is still never written.**~~ **Closed** — approval
+  writes a `source` link (existing records backfilled by migration
+  e6b2f9d4a715), and quotation, proforma and invoice screens show
+  "Source document". Original note: The table exists; no code
   path creates a link, so no PO or GRN screen shows its source document.
 * **Multipart upload** is not used: files are capped at 20 MB (BR-DOC-01)
   and a single `put_object` is correct at that size.

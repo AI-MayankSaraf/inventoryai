@@ -60,6 +60,14 @@ PARAM_SOURCE = {
     "user_id": "/users", "role_id": "/roles", "alert_id": "/alerts", "company_id": "/platform/companies",
     "transfer_id": "/inventory/transfers", "txn_id": "/inventory/transactions",
 }
+# The newest upload may still be queued for the worker, or be a file that
+# could not be read — neither has an extraction to fetch. Sample one that
+# has been read.
+_s, _read = call("/ai/documents?status=review_required&limit=1", owner)
+_read = _read.get("items", _read) if isinstance(_read, dict) else _read
+if _s == 200 and _read:
+    samples["/ai/documents"] = _read[0]
+
 skipped, checked = [], 0
 for p in gets:
     params = re.findall(r"{(\w+)}", p)
@@ -107,3 +115,6 @@ for b in real:
     print("  FAIL", b)
 print("skipped:", skipped)
 print(f"\n{len(real)} unexpected failure(s)")
+
+import sys
+sys.exit(1 if real else 0)

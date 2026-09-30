@@ -4,12 +4,14 @@ from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import audit
+from app.core import rate_limit
 from app.core.db import get_platform_session
 from app.core.deps import get_current_claims
 from app.core.errors import (
     CODE_COMPANY_SUSPENDED,
     CODE_FORBIDDEN,
     CODE_INVALID_CREDENTIALS,
+    CODE_INVALID_RESET_TOKEN,
     CODE_NOT_A_MEMBER,
     CODE_RATE_LIMITED,
     ApiError,
@@ -41,6 +43,7 @@ async def login(
     request: Request,
     session: AsyncSession = Depends(get_platform_session),
 ) -> TokenResponse:
+    rate_limit.refuse_if_exhausted(request, "login", account=body.email)
     try:
         async with session.begin():
             result = await service.login(session, email=body.email, password=body.password)
@@ -59,9 +62,11 @@ async def login(
             )
 
     except AccountLockedError as exc:
-        # BR-AUTH-03 -> 429 RATE_LIMITED. Nothing to count: the account is
-        # already locked, and letting further attempts extend the lock would
-        # let an attacker keep a victim locked out indefinitely.
+        # BR-AUTH-03 -> 429 RATE_LIMITED. Nothing to count against the
+        # account: it is already locked, and letting further attempts extend
+        # the lock would let an attacker keep a victim locked out
+        # indefinitely. The client's own failure count still goes up.
+        rate_limit.record_failure(request, "login", account=body.email)
         async with session.begin():
             await audit.record(
                 session,
@@ -98,6 +103,7 @@ async def login(
         # The failed-login transaction rolled back, so both the counter and
         # the audit row need their own — a failure we didn't record is
         # exactly the one an intrusion would rely on.
+        rate_limit.record_failure(request, "login", account=body.email)
         async with session.begin():
             await service.register_failed_login(session, identifier=body.email)
             await audit.record(
@@ -304,6 +310,9 @@ async def forgot_password(
     """Always 202, whether or not the address belongs to an account —
     anything else is an account-enumeration oracle. The mail goes out after
     the commit, like invitations."""
+    # A 429 says nothing about whether the address has an account: the
+    # count is per client and address, whichever it is.
+    rate_limit.enforce(request, "forgot_password", account=body.email)
     async with session.begin():
         issued = await password_service.request_reset(session, email=body.email, request=request)
 
@@ -319,10 +328,18 @@ async def reset_password(
     request: Request,
     session: AsyncSession = Depends(get_platform_session),
 ) -> None:
-    async with session.begin():
-        await password_service.complete_reset(
-            session, raw_token=body.token, new_password=body.new_password, request=request
-        )
+    rate_limit.refuse_if_exhausted(request, "reset_password")
+    try:
+        async with session.begin():
+            await password_service.complete_reset(
+                session, raw_token=body.token, new_password=body.new_password, request=request
+            )
+    except ApiError as exc:
+        # Guessing at tokens is the failure worth counting; a password that
+        # is too weak is a person retyping, not an attack.
+        if exc.code == CODE_INVALID_RESET_TOKEN:
+            rate_limit.record_failure(request, "reset_password")
+        raise
 
 
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)

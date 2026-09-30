@@ -14,6 +14,7 @@ import { PermissionGate } from "@/components/common/permission-gate";
 import { SectionCard } from "@/components/common/section-card";
 import { ProvenanceBadge, StatusBadge } from "@/components/common/status-badge";
 import { DeleteQuotationButton } from "@/components/documents/delete-quotation-button";
+import { SourceDocumentsCard } from "@/components/documents/source-documents-card";
 import { TaxSummary } from "@/components/procurement/tax-summary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -220,6 +221,8 @@ export default function QuotationDetailPage({
               <SectionCard title="GST Breakdown & Totals" bodyClassName="p-4">
                 <TaxSummary money={money} taxRows={detail.taxRows} />
               </SectionCard>
+
+              <SourceDocumentsCard linkedType="supplier_quotation" linkedId={id} />
 
               <AuditTrail entityType="supplier_quotation" entityId={id} />
             </div>

@@ -4,11 +4,19 @@
 
 import { useCallback } from "react";
 import { documentsApi } from "@/lib/api";
-import type { Id, ListParams } from "@/types";
+import type { DocumentProcessingStatus, Id, ListParams } from "@/types";
 import { useApiMutation, useApiQuery } from "./use-api";
 
+/** Queued or being read by the worker — the screen should keep asking. */
+export function isBeingRead(status: DocumentProcessingStatus | undefined): boolean {
+  return status === "queued" || status === "processing" || status === "uploaded";
+}
+
 export function useDocuments(params: ListParams) {
-  return useApiQuery(["documents", params], () => documentsApi.listDocuments(params));
+  return useApiQuery(["documents", params], () => documentsApi.listDocuments(params), {
+    // Refresh the list while anything on it is still being read.
+    pollWhile: (data) => (data?.items.some((d) => isBeingRead(d.processingStatus)) ? 3000 : false),
+  });
 }
 
 export function useDocument(documentId: Id | undefined) {
@@ -19,19 +27,39 @@ export function useDocument(documentId: Id | undefined) {
   );
 }
 
-export function useExtraction(documentId: Id | undefined) {
+export function useExtraction(documentId: Id | undefined, options: { enabled?: boolean } = {}) {
   return useApiQuery(
     ["extraction", documentId],
     () => documentsApi.getExtraction(documentId!),
-    { enabled: !!documentId },
+    { enabled: !!documentId && (options.enabled ?? true) },
   );
 }
 
+/** Follows the worker: asks again every 1.5 s until the document is read. */
 export function useDocumentJobStatus(documentId: Id | undefined) {
   return useApiQuery(
     ["document-job-status", documentId],
     () => documentsApi.getDocumentJobStatus(documentId!),
-    { enabled: !!documentId },
+    {
+      enabled: !!documentId,
+      pollWhile: (job) => (job && isBeingRead(job.processingStatus) ? 1500 : false),
+    },
+  );
+}
+
+export function useRetryExtraction(onSuccess?: () => void) {
+  return useApiMutation(documentsApi.retryExtraction, { onSuccess });
+}
+
+export function useDeleteDocument(onSuccess?: () => void) {
+  return useApiMutation(documentsApi.deleteDocument, { onSuccess });
+}
+
+export function useSourceDocuments(linkedType: documentsApi.LinkedRecordType, linkedId: Id | undefined) {
+  return useApiQuery(
+    ["source-documents", linkedType, linkedId],
+    () => documentsApi.getSourceDocuments(linkedType, linkedId!),
+    { enabled: !!linkedId },
   );
 }
 

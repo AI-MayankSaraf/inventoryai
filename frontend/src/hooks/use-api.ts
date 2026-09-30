@@ -34,17 +34,22 @@ export interface QueryState<T> {
   refresh: () => void;
 }
 
-export interface QueryOptions {
+export interface QueryOptions<T = unknown> {
   /** Skip the request entirely — for dependent queries. */
   enabled?: boolean;
+  /**
+   * Ask again every N ms while the returned value is a number — e.g. while a
+   * document is still being read. Given the latest data; `false` stops.
+   */
+  pollWhile?: (data: T | undefined) => number | false;
 }
 
 export function useApiQuery<T>(
   key: QueryKey,
   fetcher: () => Promise<T>,
-  options: QueryOptions = {},
+  options: QueryOptions<T> = {},
 ): QueryState<T> {
-  const { enabled = true } = options;
+  const { enabled = true, pollWhile } = options;
   const queryClient = useQueryClient();
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
@@ -55,6 +60,7 @@ export function useApiQuery<T>(
     queryKey: key,
     queryFn: () => fetcherRef.current(),
     enabled,
+    refetchInterval: pollWhile ? (q) => pollWhile(q.state.data) : undefined,
   });
 
   const refresh = useCallback(() => {

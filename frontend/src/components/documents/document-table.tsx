@@ -10,10 +10,13 @@ import {
   FileText,
   ImageIcon,
   Loader2,
+  Trash2,
   type LucideIcon,
 } from "lucide-react";
 
 import { ConfidenceMeter } from "@/components/ai/ai-provenance";
+import { ConfirmButton } from "@/components/common/confirm-dialog";
+import { PermissionGate } from "@/components/common/permission-gate";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -69,12 +72,20 @@ const TYPE_LABELS: Record<string, string> = {
   unrecognised: "Unrecognised",
 };
 
+/** Approved documents back a business record, and one being read is in the
+ * worker's hands; the server refuses both, so the button is not offered. */
+function deletable(status: DocumentProcessingStatus): boolean {
+  return !["approved", "queued", "processing", "uploaded"].includes(status);
+}
+
 export function DocumentTable({
   documents,
   onRetry,
+  onDelete,
 }: {
   documents: DocumentRow[];
   onRetry?: (documentId: string) => void;
+  onDelete?: (documentId: string) => void | Promise<void>;
 }) {
   return (
     <Table>
@@ -182,6 +193,29 @@ export function DocumentTable({
                   <span className="text-[12.5px] text-muted-foreground">Skipped</span>
                 ) : (
                   <span className="text-[12.5px] text-muted-foreground">Waiting…</span>
+                )}
+                {onDelete && deletable(doc.processingStatus) && (
+                  <PermissionGate permission="document.delete">
+                    <ConfirmButton
+                      title="Delete this document?"
+                      description={
+                        <>
+                          <span className="font-medium">{doc.originalFilename}</span> and what AI read
+                          from it will be deleted. This cannot be undone. A document that became a
+                          quotation, proforma or invoice is kept as that record&apos;s evidence.
+                        </>
+                      }
+                      confirmLabel="Delete"
+                      tone="destructive"
+                      variant="ghost"
+                      size="sm"
+                      className="ml-1 text-muted-foreground"
+                      aria-label={`Delete ${doc.originalFilename}`}
+                      onConfirm={() => onDelete(doc.id)}
+                    >
+                      <Trash2 />
+                    </ConfirmButton>
+                  </PermissionGate>
                 )}
               </TableCell>
             </TableRow>

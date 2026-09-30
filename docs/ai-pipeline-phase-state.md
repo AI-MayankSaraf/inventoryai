@@ -165,8 +165,10 @@ All green. Two things the AI suite does deliberately:
 
 ## Still open after this phase
 
-* **No worker.** Extraction runs in the request. A 20 MB PDF will make the
-  upload call slow, and nothing retries a failure automatically.
+* ~~**No worker.**~~ **Closed** — uploads are queued in
+  `ai_processing_jobs` and read by `app/modules/ai/worker.py` (embedded in
+  the API, or `python -m app.worker`). Abandoned jobs are retried, then
+  dead-lettered; see docs/DEPLOYMENT.md.
 * **No OCR**, so scanned images and image-only PDFs fail with a readable
   reason rather than being read.
 * **Embeddings are not generated.** `variant_embeddings` and the pgvector

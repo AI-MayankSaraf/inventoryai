@@ -1,0 +1,88 @@
+# Everything on one machine: adds a local S3 stand-in (Floci) and a mail
+# catcher (Mailpit, web UI on MAILPIT_UI_PORT, default 8025) and points the
+# API at them. For trying the stack out and for CI — not for real data:
+# Floci keeps files in a container volume and Mailpit delivers nothing.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+
+x-local-services: &local-services
+  AWS_ENDPOINT_URL: http://s3:4566
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
+  AWS_REGION: us-east-1
+  EMAIL_PROVIDER: smtp
+  SMTP_HOST: mail
+  SMTP_PORT: "1025"
+  SMTP_USE_TLS: "false"
+
+x-s3-init-env: &s3-init-env
+  AWS_ENDPOINT_URL: http://s3:4566
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
+  S3_BUCKET: ${S3_BUCKET:?S3_BUCKET is required}
+
+services:
+  s3:
+    image: floci/floci:latest
+    restart: unless-stopped
+    environment:
+      FLOCI_STORAGE_MODE: persistent
+      FLOCI_STORAGE_PERSISTENT_PATH: /app/data
+    volumes:
+      - s3data:/app/data
+
+  # Creates the private bucket on the stand-in (the API only does that
+  # itself in development mode), retrying until Floci is up.
+  s3-init:
+    image: inventoryai-backend
+    environment: *s3-init-env
+    command:
+      - python
+      - -c
+      - |
+        import os, time, boto3
+        from botocore.exceptions import ClientError
+        s3 = boto3.client("s3", endpoint_url=os.environ["AWS_ENDPOINT_URL"], region_name="us-east-1")
+        bucket = os.environ["S3_BUCKET"]
+        for attempt in range(60):
+            try:
+                s3.head_bucket(Bucket=bucket)
+                break
+            except ClientError:
+                s3.create_bucket(Bucket=bucket)
+                break
+            except Exception:
+                time.sleep(2)
+        else:
+            raise SystemExit("the S3 stand-in did not come up")
+        s3.head_bucket(Bucket=bucket)
+        print("bucket ready:", bucket)
+    depends_on:
+      - s3
+    restart: "no"
+
+  mail:
+    image: axllent/mailpit
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+
+  migrate:
+    environment: *local-services
+    depends_on:
+      s3-init:
+        condition: service_completed_successfully
+
+  backend:
+    environment: *local-services
+    depends_on:
+      s3:
+        condition: service_started
+      mail:
+        condition: service_started
+
+  worker:
+    environment: *local-services
+
+volumes:
+  s3data:

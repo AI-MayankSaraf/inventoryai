@@ -65,7 +65,7 @@ PLATFORM_DATABASE_URL=postgresql+asyncpg://inventoryai_platform:inventoryai_plat
 alembic upgrade head
 ```
 
-There are 20 migrations; the foundational four are below, and each later one opens with a docstring saying what it changes and why (`alembic history` lists them all):
+There are 22 migrations; the foundational four are below, and each later one opens with a docstring saying what it changes and why (`alembic history` lists them all):
 
 | Revision | What it does |
 |---|---|
@@ -118,7 +118,16 @@ uvicorn app.main:app --reload
 ```
 
 - `http://localhost:8000/health` — DB connectivity, current migration, extensions, RLS table count
-- `http://localhost:8000/docs` — interactive docs for all 29 endpoints
+- `http://localhost:8000/docs` — interactive docs for every endpoint
+
+Uploaded documents are read by a background worker. By default it runs
+inside this process (`EXTRACTION_WORKER=embedded`), so nothing else needs
+starting. To run it separately — the Docker setup does — set
+`EXTRACTION_WORKER=external` and start `python -m app.worker` alongside.
+
+With `ENVIRONMENT` set to anything but development, the API also refuses to
+start while `JWT_SECRET`/`SECRETS_KEY` are weak or `DEBUG` is on (see
+`.env.example`).
 
 On boot the app verifies that `APP_DATABASE_URL`'s role cannot bypass RLS, and refuses to start if it can, naming the role and the fix.
 

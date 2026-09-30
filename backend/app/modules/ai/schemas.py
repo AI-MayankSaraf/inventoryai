@@ -46,6 +46,22 @@ class UploadResultOut(BaseModel):
     duplicate_of: Optional[DocumentOut] = None
 
 
+class DownloadLinkOut(BaseModel):
+    url: str
+    expires_at: datetime
+
+
+class SourceDocumentOut(BaseModel):
+    id: UUID
+    original_filename: str
+    mime_type: Optional[str] = None
+    file_size_bytes: Optional[int] = None
+    document_type: Optional[str] = None
+    uploaded_at: Optional[datetime] = None
+    link_role: str
+    linked_at: Optional[datetime] = None
+
+
 class JobStatusOut(BaseModel):
     document_id: UUID
     job_id: Optional[UUID] = None

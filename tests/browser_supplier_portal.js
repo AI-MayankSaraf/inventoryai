@@ -41,6 +41,14 @@ const psql = (sql) => execSync(`psql "${PLATFORM_DB}" -At -c "${sql}"`).toString
     await staff.click('button:has-text("Send invitation")');
     await staff.waitForSelector(`text=Invitation sent to ${EMAIL}`, { timeout: 15000 });
     check("S1 staff give access from the supplier screen", true);
+    // The list refetches after the toast; wait for the new row, not a fixed delay.
+    await staff
+      .waitForFunction(
+        () => /Waiting for password/.test(document.querySelector('[data-testid="portal-access-card"]')?.textContent || ""),
+        null,
+        { timeout: 15000 },
+      )
+      .catch(() => {});
     const card = (await staff.textContent('[data-testid="portal-access-card"]')).replace(/\s+/g, " ");
     check("S2 card shows the contact waiting for a password", /Meena Iyer/.test(card) && /Waiting for password/.test(card), card.slice(0, 200));
     await staff.locator('[data-testid="portal-access-card"]').screenshot({ path: path.join(DIR, "portal-card.png") });
@@ -97,4 +105,5 @@ const psql = (sql) => execSync(`psql "${PLATFORM_DB}" -At -c "${sql}"`).toString
     await browser.close();
   }
   console.log(`\n${passed} passed, ${failed.length} failed`, failed);
+  process.exit(failed.length ? 1 : 0);
 })();

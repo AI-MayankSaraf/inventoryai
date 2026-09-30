@@ -248,3 +248,4 @@ check("B6 PO can be short-closed", s == 200 and cl.get("status") in ("closed", "
 print(f"\n{passed} passed, {len(failed)} failed")
 for f in failed:
     print("  -", f)
+sys.exit(1 if failed else 0)

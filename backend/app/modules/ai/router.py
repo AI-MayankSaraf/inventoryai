@@ -31,11 +31,11 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import storage
+from app.core import audit, storage
 from app.core.config import get_settings
 from app.core.db import commit_and_rescope, set_tenant
 from app.core.deps import get_tenant_session, require_permission, scoped_godown_filter
-from app.core.errors import CODE_DUPLICATE, CODE_NOT_FOUND, CODE_VALIDATION, ApiError
+from app.core.errors import CODE_DUPLICATE, CODE_NOT_FOUND, CODE_RECORD_IN_USE, CODE_VALIDATION, ApiError
 from app.core.security import AccessTokenClaims
 from app.modules.ai import (
     assistant_service,
@@ -46,6 +46,7 @@ from app.modules.ai import (
     review_service,
     schemas,
 )
+from app.modules.ai import worker as extraction_worker
 from app.modules.ai.parsing import SUPPORTED_EXTENSIONS, UnsupportedFile
 
 router = APIRouter(prefix="/ai", tags=["ai-documents"])
@@ -160,7 +161,9 @@ async def upload_document(
             "The file could not be stored. Nothing was saved — please try again.",
         ) from exc
 
-    job_id = await extraction_service.run_pipeline(
+    # Reading happens in the worker, after this commits; the response says
+    # "queued" and the screen follows the job (GET /documents/{id}/job).
+    job_id = await extraction_service.enqueue(
         session, company_id=claims.company_id, user_id=claims.user_id, document_id=document_id
     )
 
@@ -175,6 +178,7 @@ async def upload_document(
         # reach an object with no row pointing at it.
         await storage.adelete_quietly(storage_key)
         raise
+    extraction_worker.nudge()
 
     document = await query_service.get_document(
         session, company_id=claims.company_id, document_id=document_id
@@ -216,26 +220,7 @@ async def download_document(
     cannot be rewritten into one that renders a supplier's HTML in the
     user's session.
     """
-    document = await query_service.get_document(
-        session, company_id=claims.company_id, document_id=document_id
-    )
-    if document is None:
-        raise ApiError(status.HTTP_404_NOT_FOUND, CODE_NOT_FOUND, "Document not found")
-    key = (
-        await session.execute(
-            text("SELECT storage_key FROM documents WHERE company_id = :c AND id = :id"),
-            {"c": claims.company_id, "id": document_id},
-        )
-    ).scalar_one()
-
-    # Cheaper than discovering it as a 404 from S3 after the redirect, and
-    # it keeps the error inside our own error format.
-    if not await storage.aexists(key):
-        raise ApiError(status.HTTP_404_NOT_FOUND, CODE_NOT_FOUND, "The stored file is missing")
-
-    url, expires_at = await storage.apresigned_get_url(
-        key, filename=document["original_filename"], content_type=document["mime_type"]
-    )
+    url, expires_at = await _signed_download(session, claims.company_id, document_id)
     return RedirectResponse(
         url,
         status_code=status.HTTP_307_TEMPORARY_REDIRECT,
@@ -244,6 +229,104 @@ async def download_document(
             "Cache-Control": "no-store, private",
             "X-Url-Expires-At": expires_at.isoformat(),
         },
+    )
+
+
+@router.get("/documents/{document_id}/download-link", response_model=schemas.DownloadLinkOut)
+async def download_link(
+    document_id: UUID,
+    claims: AccessTokenClaims = Depends(require_permission("document.download")),
+    session: AsyncSession = Depends(get_tenant_session),
+):
+    """The same signed link as `/file`, as JSON — for a web page, which
+    sends its token in a header and so cannot simply follow a redirect."""
+    url, expires_at = await _signed_download(session, claims.company_id, document_id)
+    return {"url": url, "expires_at": expires_at}
+
+
+async def _signed_download(session: AsyncSession, company_id, document_id: UUID):
+    """Authorise (the row is read under the caller's RLS scope, so another
+    tenant's id is a 404) and sign a 5-minute download link."""
+    document = await query_service.get_document(session, company_id=company_id, document_id=document_id)
+    if document is None:
+        raise ApiError(status.HTTP_404_NOT_FOUND, CODE_NOT_FOUND, "Document not found")
+    key = (
+        await session.execute(
+            text("SELECT storage_key FROM documents WHERE company_id = :c AND id = :id"),
+            {"c": company_id, "id": document_id},
+        )
+    ).scalar_one()
+
+    # Cheaper than discovering it as a 404 from S3 after the redirect, and
+    # it keeps the error inside our own error format.
+    if not await storage.aexists(key):
+        raise ApiError(status.HTTP_404_NOT_FOUND, CODE_NOT_FOUND, "The stored file is missing")
+
+    return await storage.apresigned_get_url(
+        key, filename=document["original_filename"], content_type=document["mime_type"]
+    )
+
+
+@router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(
+    document_id: UUID,
+    request: Request,
+    claims: AccessTokenClaims = Depends(require_permission("document.delete")),
+    session: AsyncSession = Depends(get_tenant_session),
+) -> None:
+    """Delete an upload nothing was made from (BR-DOC-04). A document behind
+    a quotation, proforma, invoice, image or logo is refused with 409."""
+    try:
+        deleted = await extraction_service.delete_document(
+            session, company_id=claims.company_id, document_id=document_id
+        )
+    except extraction_service.DocumentBusy:
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "INVALID_STATE_TRANSITION",
+            "This document is being read right now. Wait for it to finish, then delete it.",
+        )
+    except extraction_service.DocumentInUse as exc:
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            CODE_RECORD_IN_USE,
+            f"This document is the source of a {', '.join(exc.uses)} and is kept as its evidence. "
+            "Delete or cancel that record instead if it is wrong.",
+        )
+    if deleted is None:
+        raise ApiError(status.HTTP_404_NOT_FOUND, CODE_NOT_FOUND, "Document not found")
+    await audit.record(
+        session,
+        entity_type="document",
+        action="deleted",
+        claims=claims,
+        entity_id=document_id,
+        entity_label=deleted["original_filename"],
+        description="Uploaded document deleted",
+        before={
+            "original_filename": deleted["original_filename"],
+            "sha256": deleted["sha256_hash"],
+            "document_type": deleted["document_type"],
+            "processing_status": deleted["processing_status"],
+        },
+        request=request,
+    )
+    await session.commit()
+    # After the commit: the row is gone for good, so the bytes can go too.
+    # If this fails the object is an orphan `scripts/s3_orphans.py` finds.
+    await storage.adelete_quietly(deleted["storage_key"])
+
+
+@router.get("/sources/{linked_type}/{linked_id}", response_model=list[schemas.SourceDocumentOut])
+async def source_documents(
+    linked_type: str,
+    linked_id: UUID,
+    claims: AccessTokenClaims = Depends(require_permission("document.view")),
+    session: AsyncSession = Depends(get_tenant_session),
+):
+    """The uploaded files a business record was made from."""
+    return await query_service.source_documents(
+        session, company_id=claims.company_id, linked_type=linked_type, linked_id=linked_id
     )
 
 
@@ -265,7 +348,7 @@ async def retry_extraction(
     claims: AccessTokenClaims = Depends(require_permission("ai.review")),
     session: AsyncSession = Depends(get_tenant_session),
 ):
-    """Run the pipeline again.
+    """Queue the document to be read again.
 
     The previous result is superseded rather than deleted — a reviewer's
     corrections on the old run stay readable, which matters when the
@@ -292,7 +375,13 @@ async def retry_extraction(
             {"c": claims.company_id, "d": document_id},
         )
     ).scalar_one()
-    await extraction_service.run_pipeline(
+    if document["processing_status"] in ("queued", "processing"):
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "INVALID_STATE_TRANSITION",
+            "This document is already being read. Wait for it to finish.",
+        )
+    await extraction_service.enqueue(
         session,
         company_id=claims.company_id,
         user_id=claims.user_id,
@@ -300,6 +389,7 @@ async def retry_extraction(
         attempt=attempt,
     )
     await commit_and_rescope(session, claims.company_id)
+    extraction_worker.nudge()
     return await query_service.job_status(session, company_id=claims.company_id, document_id=document_id)
 
 
