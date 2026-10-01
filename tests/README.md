@@ -1,9 +1,21 @@
 # InventoryAI tests
 
-End-to-end tests that drive the running app: the backend on `:8000`, the
-frontend on `:3000`, Postgres, S3 (Floci), and for the AI tests Ollama and
-Tesseract. They create their own records (suffixed with a random tag), so they
-can be run repeatedly against the demo company.
+End-to-end tests that drive the app through its API and in a browser:
+Postgres, S3 (Floci), Mailpit, and for the AI tests Ollama and Tesseract.
+They create their own records (suffixed with a random tag), sign people out,
+suspend companies and change settings, so run them on their own database:
+
+```bash
+# from the repository root
+backend/.venv/Scripts/python.exe tests/run_all.py --isolated
+```
+
+`--isolated` builds database `inventoryai_test` (migrated, with the demo
+tenants the suites sign in as), starts an API on `:8010` and a frontend on
+`:3010` against it, runs the suites and stops both again. Your everyday
+database, API (`:8000`) and frontend (`:3000`) are not touched. Add `--reset`
+to rebuild the test database from scratch first. `tests/test_stack.py up`
+starts the same stack by hand, for debugging one suite.
 
 ## One-time setup
 
@@ -39,7 +51,10 @@ The Python tests use the backend's virtualenv (they need `openpyxl` and
 ## Running
 
 Everything, one suite at a time, with a summary and each suite's full output
-in `tests/logs/`:
+in `tests/logs/`. The commands below run against `:8000`/`:3000`; add
+`--isolated` to any of them to use the test stack instead. Without it the
+database needs the demo tenants (`python -m app.db.seed --demo`), and the
+suites leave their records in it.
 
 ```bash
 # from the repository root

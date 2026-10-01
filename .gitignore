@@ -9,6 +9,7 @@ backend/.venv/
 __pycache__/
 *.pyc
 frontend/.next/
+frontend/.next-test/
 frontend/out/
 frontend/tsconfig.tsbuildinfo
 

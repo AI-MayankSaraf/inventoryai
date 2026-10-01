@@ -66,6 +66,15 @@ odd = f"#,Wanted {T},Count {T},Measure {T},Budget {T}\n1,MCB 32A DP,25,Nos,450.0
 t = time.time()
 s, r = upload("/procurement/rfqs/import/preview", tok, "odd.csv", odd)
 check(f"Q2 unknown headings mapped from values / AI ({time.time() - t:.1f}s)", s == 200 and r["column_map"] == {"description": 1, "quantity": 2, "uom": 3, "price": 4}, r.get("column_map"))
+# The semantic-match check needs a product to find and a supplier to quote.
+# Created here, not assumed: a clean demo database has neither.
+nos = {u["code"]: u["id"] for u in req("GET", "/catalog/uoms-available", tok)[1]}["Nos"]
+s, prod = req("POST", "/catalog/products", tok, {"name": f"Havells MCB 32A Double Pole {T}", "base_uom_id": nos,
+                                                   "hsn_code": "8536", "gst_rate": 18})
+MCB_SKU = f"CAL-MCB32-{T}"
+req("POST", "/catalog/variants", tok, {"product_id": prod["id"], "sku": MCB_SKU, "uom_id": nos,
+                                       "variant_name": "C-curve 10kA", "purchase_price": 420})
+req("POST", "/catalog/suppliers", tok, {"name": f"Quote Supplier {T}", "supplier_type": "Distributor"})
 s, st = req("GET", "/ai/embeddings/status", tok)
 check("Q3 embedding index available", s == 200 and st["configured"] and st["dimensions"] == 768, st)
 s, rb = req("POST", "/ai/embeddings/rebuild", tok)
@@ -75,8 +84,8 @@ for _ in range(60):
     if not st["rebuilding"]:
         break
 check("Q4 index catches up with products added since (incl. today's)", st["pending"] == 0 and not st["last_error"], st)
-sup = req("GET", "/catalog/suppliers?limit=1", tok)[1]
-sup = (sup.get("items", sup) if isinstance(sup, dict) else sup)[0]
+sup = req("GET", "/catalog/suppliers?limit=500", tok)[1]
+sup = next(x for x in (sup.get("items", sup) if isinstance(sup, dict) else sup) if x["name"] == f"Quote Supplier {T}")
 csv = f"{sup['name']}\nQUOTATION\nQuotation No: QK-{T}\n\nS.No,Description,Qty,Unit,Rate\n1,Circuit breaker 32 amp 2 pole,10,Nos,410\n".encode()
 s, up = upload("/ai/documents", tok, f"qk-{T}.csv", csv)
 check("Q5 quotation upload (S3) works", s == 201, up)
@@ -88,7 +97,8 @@ s, ex = req("GET", f"/ai/documents/{doc['id']}/extraction", tok)
 line = ex["lines"][0]
 s, sug = req("GET", f"/ai/lines/{line['id']}/candidates", tok)
 c = (sug.get("candidates") or [])
-check("Q6 semantic match: 'circuit breaker 32 amp 2 pole' -> Havells MCB 32A", c and c[0].get("sku") == "CAL-MCB32", c[:2])
+check("Q6 semantic match: 'circuit breaker 32 amp 2 pole' -> Havells MCB 32A",
+      c and str(c[0].get("sku", "")).startswith("CAL-MCB32"), c[:2])
 s, a = req("POST", "/ai/assistant", tok, {"question": "what is out of stock?"})
 check("Q7 assistant answers from the database", s == 200 and a.get("intent") not in (None, "unknown"), a)
 print(f"\n{passed} passed, {len(failed)} failed", failed)

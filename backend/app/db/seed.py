@@ -520,16 +520,20 @@ async def run(
                 print(f"Platform admin {admin_email} already exists; left unchanged.")
 
         if demo:
-            exists = (
-                await conn.execute(text("SELECT 1 FROM users WHERE lower(email) = 'owner@acme-demo.test'"))
-            ).scalar()
-            if exists:
-                print("Demo company already present; not creating a second one.")
-            else:
-                result = await seed_demo_company(conn)
-                admin = await seed_platform_admin(conn)
-                print("Demo company created:", result)
-                print("Demo platform admin:", admin)
+            # Two tenants: the test suites check isolation between them, so
+            # the second one (Beta) is part of the demo data, not optional.
+            for name, owner_email in (("Acme Trading Co", "owner@acme-demo.test"),
+                                      ("Beta Traders", "owner@beta-demo.test")):
+                exists = (
+                    await conn.execute(text("SELECT 1 FROM users WHERE lower(email) = :e"), {"e": owner_email})
+                ).scalar()
+                if exists:
+                    print(f"Demo company {name} already present; not creating a second one.")
+                else:
+                    result = await seed_demo_company(conn, name=name, owner_email=owner_email)
+                    print(f"Demo company {name} created:", result)
+            admin = await seed_platform_admin(conn)
+            print("Demo platform admin:", admin)
 
 
 def _main() -> None:

@@ -5,13 +5,19 @@
     backend/.venv/Scripts/python.exe tests/run_all.py --skip ai  # no Ollama here
     backend/.venv/Scripts/python.exe tests/run_all.py e2e_auth browser_roles
     backend/.venv/Scripts/python.exe tests/run_all.py --list
+    backend/.venv/Scripts/python.exe tests/run_all.py --isolated           # own database (recommended)
+    backend/.venv/Scripts/python.exe tests/run_all.py --isolated --reset   # ...rebuilt from scratch first
 
 Suites run sequentially on purpose: several of them sign sessions out,
 suspend test companies or change settings, and running two at once makes
 the other one fail for reasons that have nothing to do with the code.
 
-Needs the backend (API_URL, default http://127.0.0.1:8000) and, for the
-browser suites, the frontend (APP_URL, default http://localhost:3000). Run
+With --isolated the runner builds and starts its own stack (test_stack.py):
+database inventoryai_test, API on :8010, frontend on :3010, stopped again at
+the end, so test records never land in the everyday database. Without it the
+suites need the backend (API_URL, default http://127.0.0.1:8000) and, for the
+browser suites, the frontend (APP_URL, default http://localhost:3000) seeded
+with `python -m app.db.seed --demo`. Run
 it with the backend's Python so the suites find openpyxl, Pillow and the
 app's settings. Exits non-zero if any suite fails.
 """
@@ -109,6 +115,9 @@ def main() -> int:
     parser.add_argument("--list", action="store_true", help="list the suites and exit")
     parser.add_argument("--log-dir", default=str(TESTS / "logs"), help="where each suite's full output is saved")
     parser.add_argument("--timeout", type=int, default=900, help="seconds per suite")
+    parser.add_argument("--isolated", action="store_true",
+                        help="run on a separate test database, API (:8010) and frontend (:3010)")
+    parser.add_argument("--reset", action="store_true", help="with --isolated: rebuild the test database first")
     opts = parser.parse_args()
 
     groups = {g for g in opts.only.split(",") if g}
@@ -133,6 +142,30 @@ def main() -> int:
             print(f"{group:8} {name:36} {', '.join(sorted(needs))}")
         return 0
 
+    stack = None
+    extra_env: dict[str, str] = {}
+    if opts.isolated:
+        global API_URL, APP_URL
+        import test_stack
+
+        test_stack.prepare(reset=opts.reset)
+        stack = test_stack.Stack(frontend=any(g == "browser" for _n, g in chosen))
+        try:
+            stack.start()
+        except Exception as e:
+            stack.stop()
+            print(e)
+            return 2
+        extra_env = test_stack.settings_env()
+        API_URL, APP_URL = test_stack.API_URL, test_stack.APP_URL
+    try:
+        return _run(opts, chosen, skipped, skip, extra_env)
+    finally:
+        if stack:
+            stack.stop()
+
+
+def _run(opts, chosen, skipped, skip, extra_env) -> int:
     if not reachable(API_URL + "/health"):
         print(f"The backend is not answering at {API_URL}/health — start it first.")
         return 2
@@ -142,7 +175,7 @@ def main() -> int:
 
     log_dir = Path(opts.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ, PYTHONIOENCODING="utf-8", API_URL=API_URL, APP_URL=APP_URL)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "API_URL": API_URL, "APP_URL": APP_URL, **extra_env}
 
     results = []
     started = time.monotonic()

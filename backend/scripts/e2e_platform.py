@@ -151,6 +151,11 @@ def main() -> int:  # noqa: C901 - a boundary suite is a long list of cases
                               "AND NOT is_platform_admin")[0]["n"], kpis)
     check("R04 30-day actives never exceed total users", kpis["active_users_30d"] <= kpis["users"], kpis)
 
+    # R07 needs Acme to own at least one SKU; a clean demo database has none.
+    uom = {u["code"]: u["id"] for u in ok(*call("GET", "/catalog/uoms-available", owner))}["Nos"]
+    product = ok(*call("POST", "/catalog/products", owner, {"name": f"Console count probe {SFX}", "base_uom_id": uom}), 201)
+    ok(*call("POST", "/catalog/variants", owner, {"product_id": product["id"], "sku": f"PROBE-{SFX}", "uom_id": uom}), 201)
+
     companies = ok(*call("GET", "/platform/companies", admin))
     check("R05 every tenant is listed", len(companies) >= 2, len(companies))
     acme = next((c for c in companies if c["id"] == acme_id), None)

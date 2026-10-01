@@ -96,14 +96,15 @@ Then sign in at `/login` with that account, open **System Admin → Onboard Comp
 python -m app.db.seed --demo
 ```
 
-Adds one demo tenant — **Acme Trading Co** — and a demo platform admin, with well-known passwords:
+Adds two demo tenants — **Acme Trading Co** and **Beta Traders** — and a demo platform admin, with well-known passwords:
 
 ```
 owner:           owner@acme-demo.test / Demo@12345
+second tenant:   owner@beta-demo.test / Demo@12345
 platform admin:  platform-admin@inventoryai.test / Platform@12345
 ```
 
-The test suites in `tests/` use these accounts. Never run `--demo` on a database other people can reach — anyone who has read this file can sign in.
+The test suites in `tests/` use these accounts; `tests/run_all.py --isolated` seeds them into a separate `inventoryai_test` database so your own data stays clean. Never run `--demo` on a database other people can reach — anyone who has read this file can sign in.
 
 ### Reference data only
 
