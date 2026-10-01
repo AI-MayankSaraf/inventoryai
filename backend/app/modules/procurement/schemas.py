@@ -279,6 +279,8 @@ class PoOut(BaseModel):
     row_version: int
     created_at: datetime
     updated_at: datetime
+    # Set by the list endpoint, which returns no lines.
+    item_count: Optional[int] = None
     items: list[PoItemOut] = Field(default_factory=list)
 
 

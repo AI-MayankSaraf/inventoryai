@@ -50,6 +50,8 @@ class ReportSpec:
     columns: tuple[Column, ...]
     sql: str
     # Columns worth adding up. Everything else is left alone.
+    # Never a quantity column that spans products: 12 coils + 2,400 metres
+    # + 117 kg is not a number anyone can use. Money and counts only.
     total_columns: tuple[str, ...] = ()
     # Reports whose rows are per-godown honour the caller's godown scope.
     godown_column: Optional[str] = None
@@ -73,7 +75,7 @@ REPORTS: tuple[ReportSpec, ...] = (
             Column("quantity", "Quantity", "right", _N),
             Column("value", "Value", "right", _M),
         ),
-        total_columns=("quantity", "value"),
+        total_columns=("value",),
         godown_column="sb.godown_id",
         sql="""
             SELECT pv.sku, TRIM(p.name || ' ' || COALESCE(pv.variant_name, '')) AS product,
@@ -145,7 +147,7 @@ REPORTS: tuple[ReportSpec, ...] = (
             Column("suggested_qty", "Suggested", "right", _N),
             Column("supplier", "Preferred supplier"),
         ),
-        total_columns=("suggested_qty",),
+        total_columns=(),
         godown_column="sb.godown_id",
         sql="""
             SELECT pv.sku, TRIM(p.name || ' ' || COALESCE(pv.variant_name, '')) AS product,
@@ -194,7 +196,7 @@ REPORTS: tuple[ReportSpec, ...] = (
             Column("quantity", "Quantity", "right", _N),
             Column("value", "Value", "right", _M),
         ),
-        total_columns=("skus", "quantity", "value"),
+        total_columns=("skus", "value"),
         godown_column="sb.godown_id",
         sql="""
             SELECT COALESCE(c.name, 'Uncategorised') AS category, g.name AS godown,
@@ -229,7 +231,7 @@ REPORTS: tuple[ReportSpec, ...] = (
             Column("quantity", "On hand", "right", _N),
             Column("days_left", "Days left", "right", _N),
         ),
-        total_columns=("quantity",),
+        total_columns=(),
         godown_column="sb.godown_id",
         sql="""
             SELECT bt.expires_on, bt.batch_number, pv.sku,
@@ -290,6 +292,9 @@ REPORTS: tuple[ReportSpec, ...] = (
                 LEFT JOIN purchase_orders po ON po.id = gr.purchase_order_id AND po.company_id = gr.company_id
                 LEFT JOIN godowns g ON g.id = gr.godown_id AND g.company_id = gr.company_id
                 WHERE gr.company_id = :c
+                  -- Only receipts that posted stock: a draft has moved
+                  -- nothing yet and a cancelled one never will.
+                  AND gr.status NOT IN ('draft', 'cancelled')
                   AND (CAST(:date_from AS date) IS NULL OR gr.grn_date >= CAST(:date_from AS date))
                   AND (CAST(:date_to AS date) IS NULL OR gr.grn_date <= CAST(:date_to AS date))
                   AND (CAST(:supplier_id AS uuid) IS NULL OR gr.supplier_id = CAST(:supplier_id AS uuid))
@@ -316,6 +321,7 @@ REPORTS: tuple[ReportSpec, ...] = (
                 LEFT JOIN goods_receipts gr ON gr.id = si.goods_receipt_id AND gr.company_id = si.company_id
                 LEFT JOIN godowns g ON g.id = COALESCE(gr.godown_id, po.delivery_godown_id) AND g.company_id = si.company_id
                 WHERE si.company_id = :c
+                  AND si.status <> 'cancelled'
                   AND (CAST(:date_from AS date) IS NULL OR si.invoice_date >= CAST(:date_from AS date))
                   AND (CAST(:date_to AS date) IS NULL OR si.invoice_date <= CAST(:date_to AS date))
                   AND (CAST(:supplier_id AS uuid) IS NULL OR si.supplier_id = CAST(:supplier_id AS uuid))
@@ -377,7 +383,7 @@ REPORTS: tuple[ReportSpec, ...] = (
             Column("pending", "Pending", "right", _N),
             Column("expected_delivery_date", "Due", None, _D),
         ),
-        total_columns=("ordered", "received", "pending"),
+        total_columns=(),
         godown_column="po.delivery_godown_id",
         sql="""
             SELECT po.po_number, COALESCE(s.name, '') AS supplier, pv.sku,
@@ -414,7 +420,7 @@ REPORTS: tuple[ReportSpec, ...] = (
             Column("rejected", "Rejected", "right", _N),
             Column("rejection_pct", "Rejected %", "right", _N),
         ),
-        total_columns=("receipts", "delivered", "accepted", "rejected"),
+        total_columns=("receipts",),
         sql="""
             SELECT COALESCE(s.name, '') AS supplier,
                    COUNT(DISTINCT gr.id) AS receipts,

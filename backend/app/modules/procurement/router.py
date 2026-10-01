@@ -12,7 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_tenant_session, require_permission
+from app.core.deps import get_tenant_session, require_any_permission, require_permission
 from app.core.security import AccessTokenClaims
 from app.modules.documents.schemas import VarianceOut as DocVarianceOut
 from app.modules.procurement import (
@@ -184,7 +184,7 @@ async def list_pos(
     offset: int = Query(default=0, ge=0),
     status_filter: Optional[str] = Query(default=None, alias="status"),
     supplier_id: Optional[UUID] = None,
-    claims: AccessTokenClaims = Depends(require_permission("po.view")),
+    claims: AccessTokenClaims = Depends(require_any_permission("po.view", "grn.create")),
     session: AsyncSession = Depends(get_tenant_session),
 ):
     return await po_service.list_pos(session, company_id=claims.company_id, limit=limit, offset=offset, status_filter=status_filter, supplier_id=supplier_id)
@@ -203,7 +203,7 @@ async def create_po(
 @router.get("/purchase-orders/{po_id}", response_model=schemas.PoOut)
 async def get_po(
     po_id: UUID,
-    claims: AccessTokenClaims = Depends(require_permission("po.view")),
+    claims: AccessTokenClaims = Depends(require_any_permission("po.view", "grn.create")),
     session: AsyncSession = Depends(get_tenant_session),
 ):
     return await po_service.get_po(session, company_id=claims.company_id, po_id=po_id)

@@ -1304,6 +1304,8 @@ interface PoOut {
   row_version: number;
   created_at: string;
   updated_at: string;
+  /** Only on list rows, which come without their lines. */
+  item_count?: number | null;
   items: PoItemOut[];
 }
 
@@ -1402,7 +1404,7 @@ export async function listPurchaseOrders(params: ListParams = {}): Promise<ListR
       ...order,
       supplierName: suppliersById.get(po.supplier_id)?.name ?? "",
       godownName: godownsById.get(po.delivery_godown_id)?.name ?? "",
-      itemCount: po.items.length,
+      itemCount: po.item_count ?? po.items.length,
       isOverdue:
         !!order.expectedDeliveryDate &&
         order.expectedDeliveryDate < today &&

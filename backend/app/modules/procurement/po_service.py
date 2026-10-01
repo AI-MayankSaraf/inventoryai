@@ -104,7 +104,10 @@ async def list_pos(
                 "other_charges, round_off, total_amount, status, approved_by, approved_at, sent_at, "
                 "cancelled_at, cancelled_by, cancellation_reason, notes, received_pct, fully_received_at, row_version, "
                 "created_at, updated_at, "
-                "(SELECT u.full_name FROM users u WHERE u.id = purchase_orders.cancelled_by) AS cancelled_by_name "
+                "(SELECT u.full_name FROM users u WHERE u.id = purchase_orders.cancelled_by) AS cancelled_by_name, "
+                # The list leaves the lines out; the count is all it shows of them.
+                "(SELECT COUNT(*) FROM purchase_order_items i WHERE i.purchase_order_id = purchase_orders.id "
+                "AND i.company_id = purchase_orders.company_id) AS item_count "
                 f"FROM purchase_orders WHERE {' AND '.join(where)} "
                 "ORDER BY po_date DESC, po_number DESC LIMIT :limit OFFSET :offset"
             ),

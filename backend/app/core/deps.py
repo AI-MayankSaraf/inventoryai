@@ -175,6 +175,22 @@ def require_permission(code: str) -> Callable:
     return _dependency
 
 
+def require_any_permission(*codes: str) -> Callable:
+    """Like `require_permission`, but any one of `codes` is enough. For reads
+    another job depends on: receiving goods (`grn.create`) means reading the
+    purchase order being received, without `po.view`'s menu or actions."""
+
+    async def _dependency(claims: AccessTokenClaims = Depends(get_current_claims)) -> AccessTokenClaims:
+        if not any(code in claims.permissions for code in codes):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing permission: one of {', '.join(codes)}",
+            )
+        return claims
+
+    return _dependency
+
+
 async def get_tenant_session(
     claims: AccessTokenClaims = Depends(get_current_claims),
     session: AsyncSession = Depends(get_session),
