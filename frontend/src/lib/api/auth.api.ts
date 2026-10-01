@@ -251,12 +251,6 @@ export function currentImpersonation(): ImpersonationSession | null {
   return readSession()?.impersonation ?? null;
 }
 
-/** The account the sign-in screen offers. Only one exists in the seeded
- * backend today (`app/db/seed.py::seed_demo_company`). */
-export function demoAccounts(): { username: string; password: string; label: string; roleName: string }[] {
-  return [{ username: "owner@acme-demo.test", password: "Demo@12345", label: "Demo Owner", roleName: "Owner" }];
-}
-
 /* ------------------------------------------------------ Password reset */
 
 /** Always resolves, whatever the address: the backend answers 202 either

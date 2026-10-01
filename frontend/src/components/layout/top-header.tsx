@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { useAlertSummary } from "@/hooks/use-ops";
-import { useIsTenantUser, useMyCompanies, useSession, useSwitchCompany } from "@/hooks/use-session";
+import { useIsTenantUser, useMyCompanies, usePermission, useSession, useSwitchCompany } from "@/hooks/use-session";
 import type { SessionUser } from "@/types";
 
 export function TopHeader({
@@ -40,6 +40,9 @@ export function TopHeader({
 }) {
   const router = useRouter();
   const { signOut } = useSession();
+  // Settings belong to a company; a platform admin has none, so the link
+  // would only lead to a page the server refuses. Same rule as the sidebar.
+  const canViewSettings = usePermission("company.view");
   // BR-AUTH-13: only rendered when the login belongs to more than one
   // company — for everyone else the menu looks exactly as before.
   const myCompanies = useMyCompanies();
@@ -189,12 +192,14 @@ export function TopHeader({
                 My Profile
               </Link>
             </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href="/settings">
-                <Settings />
-                Settings
-              </Link>
-            </DropdownMenuItem>
+            {canViewSettings && (
+              <DropdownMenuItem asChild>
+                <Link href="/settings">
+                  <Settings />
+                  Settings
+                </Link>
+              </DropdownMenuItem>
+            )}
             {user?.isPlatformAdmin && (
               <DropdownMenuItem asChild>
                 <Link href="/system-admin">

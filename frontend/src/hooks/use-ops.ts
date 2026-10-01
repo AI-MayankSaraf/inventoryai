@@ -6,6 +6,7 @@ import { useCallback } from "react";
 import { documentsApi, inventoryApi, opsApi, procurementApi } from "@/lib/api";
 import type { Id, ListParams } from "@/types";
 import { useApiMutation, useApiQuery } from "./use-api";
+import { usePermissions } from "./use-session";
 
 export function useDashboard(godownId?: Id) {
   return useApiQuery(["dashboard", godownId], () => opsApi.getDashboardSummary(godownId));
@@ -86,16 +87,32 @@ export function useReport(key: string | undefined, params: opsApi.ReportParams) 
  * These used to be constants in `nav-config.ts` ("23 low stock") that never
  * changed and never matched the screen behind them (I13). They are now derived
  * from the same queries the screens use.
+ *
+ * Each count is asked for only when the role may read it: one 403 used to
+ * fail the whole Promise.all, so a Godown Manager or Staff user lost every
+ * badge (and logged 403s on every page).
  */
 export function useNavBadges(enabled = true) {
-  return useApiQuery(["nav-badges"], async () => {
+  const { can } = usePermissions();
+  const allowed = {
+    quotations: can("quotation.view"),
+    orders: can("po.view"),
+    lowStock: can("inventory.view"),
+    documents: can("document.view"),
+    alerts: can("alert.view"),
+    variances: can("proforma.view"),
+  };
+  const none = { items: [], total: 0 };
+  return useApiQuery(["nav-badges", allowed], async () => {
     const [quotations, orders, lowStock, documents, alerts, variances] = await Promise.all([
-      procurementApi.listQuotations({ filters: { status: "under_review" }, limit: 1 }),
-      procurementApi.listPurchaseOrders({ limit: Number.MAX_SAFE_INTEGER }),
-      inventoryApi.listLowStock({ limit: 1 }),
-      documentsApi.listDocuments({ filters: { processingStatus: "review_required" }, limit: 1 }),
-      opsApi.getAlertSummary(),
-      procurementApi.listVariances({ filters: { status: "open" }, limit: 1 }),
+      allowed.quotations ? procurementApi.listQuotations({ filters: { status: "under_review" }, limit: 1 }) : none,
+      allowed.orders ? procurementApi.listPurchaseOrders({ limit: Number.MAX_SAFE_INTEGER }) : none,
+      allowed.lowStock ? inventoryApi.listLowStock({ limit: 1 }) : none,
+      allowed.documents
+        ? documentsApi.listDocuments({ filters: { processingStatus: "review_required" }, limit: 1 })
+        : none,
+      allowed.alerts ? opsApi.getAlertSummary() : { unread: 0 },
+      allowed.variances ? procurementApi.listVariances({ filters: { status: "open" }, limit: 1 }) : none,
     ]);
     return {
       quotationsToReview: quotations.total,

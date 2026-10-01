@@ -30,10 +30,6 @@ export function LoginForm() {
   const [showPassword, setShowPassword] = React.useState(false);
   const [errors, setErrors] = React.useState<FieldErrors>({});
 
-  // The demo accounts come from the seeded user table, so the buttons below
-  // can never drift from the credentials that actually work.
-  const accounts = React.useMemo(() => authApi.demoAccounts(), []);
-
   const login = useApiMutation(
     (input: { identifier: string; password: string }) =>
       authApi.signIn(input.identifier, input.password),
@@ -49,12 +45,8 @@ export function LoginForm() {
   function validate(): FieldErrors {
     const next: FieldErrors = {};
     const trimmed = email.trim();
-    const isKnownUsername = accounts.some(
-      (a) => a.username.toLowerCase() === trimmed.toLowerCase(),
-    );
-    if (!trimmed) next.email = "Email or username is required.";
-    else if (!isKnownUsername && !EMAIL_REGEX.test(trimmed))
-      next.email = "Enter a valid email address or username.";
+    if (!trimmed) next.email = "Email is required.";
+    else if (!EMAIL_REGEX.test(trimmed)) next.email = "Enter a valid email address.";
 
     if (!password) next.password = "Password is required.";
     else if (password.length < 6)
@@ -72,13 +64,6 @@ export function LoginForm() {
     if (Object.keys(nextErrors).length > 0) return;
 
     await login.run({ identifier: email.trim(), password });
-  }
-
-  function quickFill(account: (typeof accounts)[number]) {
-    setEmail(account.username);
-    setPassword(account.password);
-    setErrors({});
-    login.reset();
   }
 
   return (
@@ -116,13 +101,13 @@ export function LoginForm() {
 
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div className="space-y-1.5">
-          <Label htmlFor="email">Email or Username</Label>
+          <Label htmlFor="email">Email</Label>
           <Input
             id="email"
             name="email"
             type="text"
             autoComplete="username"
-            placeholder="you@company.com or superadmin"
+            placeholder="you@company.com"
             value={email}
             aria-invalid={!!errors.email}
             aria-describedby={errors.email ? "email-error" : undefined}
@@ -236,35 +221,6 @@ export function LoginForm() {
           Go to the Supplier Portal
         </Link>
       </p>
-
-      <div className="mt-7 space-y-2 rounded-lg border border-dashed border-border bg-muted/40 p-3.5">
-        <p className="text-[11.5px] font-medium text-muted-foreground">
-          Prototype demo logins — click to fill
-        </p>
-        {accounts.map((account) => (
-          <button
-            key={account.username}
-            type="button"
-            onClick={() => quickFill(account)}
-            disabled={submitting}
-            className="flex w-full items-center justify-between rounded-md border border-border bg-card px-2.5 py-1.5 text-left transition-colors hover:border-ring hover:bg-muted disabled:opacity-50"
-          >
-            <span>
-              <span className="block text-[12px] font-medium text-foreground">
-                {account.label} · {account.roleName}
-              </span>
-              <span className="block font-mono text-[10.5px] text-muted-foreground">
-                {account.username}
-              </span>
-            </span>
-            <span className="font-mono text-[10.5px] text-muted-foreground">{account.password}</span>
-          </button>
-        ))}
-        <p className="text-[10.5px] text-muted-foreground/70">
-          These are the only accounts that sign in. Sign-in selects which seeded user the prototype
-          acts as — it is not an authentication system.
-        </p>
-      </div>
     </div>
   );
 }

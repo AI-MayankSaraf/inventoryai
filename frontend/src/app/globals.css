@@ -208,6 +208,30 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* Date fields that draw their own calendar icon (an <svg> right after the
+     input) showed two icons in Chromium. Keep the native picker button but
+     make it invisible and lay it over the drawn icon, so clicking the icon
+     still opens the picker. */
+  input[type="date"]:has(+ svg) {
+    position: relative;
+  }
+  input[type="date"]:has(+ svg)::-webkit-calendar-picker-indicator {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 2.25rem;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+  }
+  /* Firefox draws its own date button and offers no way to hide it, so
+     there the decorative icon goes instead. */
+  @supports (-moz-appearance: none) {
+    input[type="date"] + svg {
+      display: none;
+    }
+  }
+
   /* Slim, unobtrusive scrollbars */
   ::-webkit-scrollbar {
     width: 10px;

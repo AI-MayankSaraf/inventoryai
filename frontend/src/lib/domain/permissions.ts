@@ -108,18 +108,19 @@ export function canApprovePoValue(
 
 /* --------------------------------------------------- Route-level guards */
 
-/** Which permission a top-level route requires, used by the sidebar and guards. */
+/** Which permission a route requires. The app shell refuses to mount a page
+ * the user cannot open, so its data requests are never sent. */
 export const ROUTE_PERMISSIONS: { prefix: string; permission: PermissionCode }[] = [
   { prefix: "/dashboard", permission: "dashboard.view" },
   { prefix: "/products", permission: "product.view" },
   { prefix: "/inventory", permission: "inventory.view" },
   { prefix: "/godowns", permission: "godown.view" },
   { prefix: "/suppliers", permission: "supplier.view" },
-  { prefix: "/rfq", permission: "rfq.view" },
-  { prefix: "/quotations", permission: "quotation.view" },
-  { prefix: "/comparison", permission: "comparison.view" },
-  { prefix: "/purchase-orders", permission: "po.view" },
-  { prefix: "/proforma", permission: "proforma.view" },
+  { prefix: "/procurement/rfq", permission: "rfq.view" },
+  { prefix: "/procurement/quotations", permission: "quotation.view" },
+  { prefix: "/procurement/comparison", permission: "comparison.view" },
+  { prefix: "/procurement/purchase-orders", permission: "po.view" },
+  { prefix: "/procurement/proforma", permission: "proforma.view" },
   { prefix: "/goods-receipt", permission: "grn.view" },
   { prefix: "/supplier-invoices", permission: "invoice.view" },
   { prefix: "/purchase-returns", permission: "return.view" },
