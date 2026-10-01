@@ -55,6 +55,9 @@ services:
                 time.sleep(2)
         else:
             raise SystemExit("the S3 stand-in did not come up")
+        # Same lock-down as start-storage.ps1; verify_s3 checks it.
+        s3.put_public_access_block(Bucket=bucket, PublicAccessBlockConfiguration=dict(
+            BlockPublicAcls=True, IgnorePublicAcls=True, BlockPublicPolicy=True, RestrictPublicBuckets=True))
         s3.head_bucket(Bucket=bucket)
         print("bucket ready:", bucket)
     depends_on:
