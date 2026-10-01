@@ -96,8 +96,11 @@ class InventoryTransaction(UUIDPkMixin, TenantMixin, Base):
         self_tenant_fk("inventory_transactions", "reverses_txn_id", ondelete="RESTRICT"),
         # One reference legitimately covers many lines (a GRN posts one row
         # per accepted line), so the number alone is not unique (§5.2 fn 1).
+        # Batch and source line are part of the key so two batches of one
+        # product on one GRN or transfer can both post (f3c8a1d6b902).
         UniqueConstraint(
-            "company_id", "txn_number", "product_variant_id", "godown_id", "txn_type", name="uq_txn_number"
+            "company_id", "txn_number", "product_variant_id", "godown_id", "txn_type", "batch_id", "source_line_id",
+            name="uq_txn_number", postgresql_nulls_not_distinct=True,
         ),
         Index("ix_inventory_transactions_ledger", "company_id", "product_variant_id", "godown_id", "txn_date"),
         Index("ix_inventory_transactions_by_source", "company_id", "source_type", "source_id"),
