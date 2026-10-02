@@ -14,6 +14,7 @@ import {
 
 import { AsyncBoundary, FormError, LoadingCard } from "@/components/common/async-state";
 import { AuditTrail } from "@/components/common/audit-trail";
+import { AttachmentsCard } from "@/components/documents/attachments";
 import { ConfirmButton } from "@/components/common/confirm-dialog";
 import { DetailGrid, DetailRow } from "@/components/common/detail-row";
 import { PageHeader } from "@/components/common/page-header";
@@ -68,6 +69,11 @@ import type { GoodsReceiptStatus, Id } from "@/types";
 export function GrnDetailScreen({ id }: { id: Id }) {
   const state = useGoodsReceipt(id);
   const returnableState = useReturnableLines(id);
+  // Set by the GRN form when some chosen files failed to upload after the
+  // receipt itself was saved — read once, so a refresh does not repeat it.
+  const [attachFailed] = React.useState(() =>
+    typeof window === "undefined" ? 0 : Number(new URLSearchParams(window.location.search).get("attach_failed") ?? 0),
+  );
   const settingsState = useCompanySettings();
 
   // The confirmation result panel covers the immediate feedback, but the
@@ -500,6 +506,19 @@ export function GrnDetailScreen({ id }: { id: Id }) {
                   </Table>
                 </SectionCard>
               )}
+
+              <AttachmentsCard
+                linkedType="goods_receipt"
+                linkedId={grn.id}
+                editPermissions={["grn.create", "grn.update"]}
+                description="Delivery challan, invoice or photos"
+                dropTitle="Upload delivery challan, invoice or any document"
+                notice={
+                  attachFailed > 0
+                    ? `${attachFailed} file${attachFailed === 1 ? "" : "s"} could not be attached when this receipt was saved. Add ${attachFailed === 1 ? "it" : "them"} again below.`
+                    : null
+                }
+              />
 
               <AuditTrail entityType="goods_receipt" entityId={grn.id} />
 

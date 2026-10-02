@@ -247,7 +247,7 @@ export interface UploadInput {
  */
 export async function uploadDocument(input: UploadInput): Promise<UploadDocumentResult> {
   const extension = (input.file.name.split(".").pop() ?? "").toLowerCase();
-  if (!["xlsx", "xls", "csv", "pdf", "docx", "jpg", "jpeg", "png"].includes(extension)) {
+  if (!["xlsx", "xls", "csv", "pdf", "docx", "jpg", "jpeg", "png", "webp"].includes(extension)) {
     validationFailed([
       { field: "file", message: `.${extension || "?"} files can't be read — upload a spreadsheet, CSV or PDF.` },
     ]);
@@ -330,6 +330,86 @@ export async function getSourceDocuments(linkedType: LinkedRecordType, linkedId:
     fileSizeBytes: r.file_size_bytes,
     uploadedAt: r.uploaded_at,
   }));
+}
+
+/* ----------------------------------------------------------- Attachments */
+
+/** Records files can be attached to (`attachments.RECORD_KINDS` on the server). */
+export type AttachableRecordType = "goods_receipt";
+
+export const ATTACHMENT_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "pdf", "docx", "xlsx"];
+export const ATTACHMENT_ACCEPT = ATTACHMENT_EXTENSIONS.map((e) => `.${e}`).join(",");
+
+export interface Attachment {
+  linkId: Id;
+  documentId: Id;
+  filename: string;
+  extension: string;
+  sizeBytes: number;
+  uploadedAt: string;
+  uploadedByName: string;
+  isImage: boolean;
+  /** Signed and short-lived — refetch the list rather than keep it. */
+  url: string;
+}
+
+interface AttachmentOut {
+  link_id: string;
+  document_id: string;
+  original_filename: string;
+  file_extension: string;
+  file_size_bytes: number;
+  uploaded_at: string;
+  uploaded_by_name: string;
+  is_image: boolean;
+  url: string;
+}
+
+function toAttachment(o: AttachmentOut): Attachment {
+  return {
+    linkId: o.link_id,
+    documentId: o.document_id,
+    filename: o.original_filename,
+    extension: o.file_extension,
+    sizeBytes: o.file_size_bytes,
+    uploadedAt: o.uploaded_at,
+    uploadedByName: o.uploaded_by_name,
+    isImage: o.is_image,
+    url: o.url,
+  };
+}
+
+/** The extension check the server makes, so a wrong pick fails before upload. */
+export function attachmentProblem(file: File): string | null {
+  const extension = (file.name.split(".").pop() ?? "").toLowerCase();
+  return ATTACHMENT_EXTENSIONS.includes(extension)
+    ? null
+    : `${file.name}: upload a photo (.jpg, .png, .webp), a PDF, or a Word or Excel file.`;
+}
+
+export async function listAttachments(linkedType: AttachableRecordType, linkedId: Id): Promise<Attachment[]> {
+  const rows = await httpGet<AttachmentOut[]>(`/ai/attachments/${linkedType}/${linkedId}`);
+  return rows.map(toAttachment);
+}
+
+export async function uploadAttachment(input: {
+  linkedType: AttachableRecordType;
+  linkedId: Id;
+  file: File;
+}): Promise<Attachment> {
+  const problem = attachmentProblem(input.file);
+  if (problem) validationFailed([{ field: "file", message: problem }]);
+  return toAttachment(
+    await httpUpload<AttachmentOut>(`/ai/attachments/${input.linkedType}/${input.linkedId}`, input.file),
+  );
+}
+
+export async function removeAttachment(input: {
+  linkedType: AttachableRecordType;
+  linkedId: Id;
+  linkId: Id;
+}): Promise<void> {
+  await httpDelete(`/ai/attachments/${input.linkedType}/${input.linkedId}/${input.linkId}`);
 }
 
 /* ------------------------------------------------------------ Extraction */

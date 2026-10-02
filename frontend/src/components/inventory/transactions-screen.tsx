@@ -9,6 +9,7 @@ import {
   Download,
   ExternalLink,
   Info,
+  Loader2,
   PackageCheck,
   PackagePlus,
   ShieldAlert,
@@ -18,7 +19,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { AsyncBoundary } from "@/components/common/async-state";
+import { AsyncBoundary, FormError } from "@/components/common/async-state";
 import { PageHeader } from "@/components/common/page-header";
 import { DataToolbar, TablePagination } from "@/components/common/data-toolbar";
 import { FilterSelect } from "@/components/common/filter-select";
@@ -36,8 +37,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useGodowns } from "@/hooks/use-catalog";
-import { useListControls } from "@/hooks/use-api";
+import { useApiMutation, useListControls } from "@/hooks/use-api";
 import { useTransactions } from "@/hooks/use-inventory";
+import { inventoryApi } from "@/lib/api";
+import { downloadCsv } from "@/lib/csv";
 import { formatDate, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Id, InventorySourceType, InventoryTxnType } from "@/types";
@@ -95,6 +98,31 @@ export function TransactionsScreen() {
   const godowns = godownsState.data ?? [];
   const state = useTransactions(controls.params);
 
+  // Every row the current search and filters match — not just this page.
+  const exportCsv = useApiMutation(async () => {
+    const all = await inventoryApi.listTransactions({ ...controls.params, cursor: null, limit: 100_000 });
+    downloadCsv(
+      "inventory-transactions",
+      ["Txn #", "Date", "Time", "Product", "SKU", "Godown", "Type", "Quantity", "Balance After", "Performed By", "Source"],
+      all.items.map((t) => {
+        const when = new Date(t.txnDate);
+        return [
+          t.txnNumber,
+          when.toLocaleDateString("en-CA"),
+          when.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
+          t.productName,
+          t.sku,
+          t.godownName,
+          TYPE_META[t.txnType]?.label ?? t.txnType,
+          t.quantity,
+          t.balanceAfter,
+          t.performedByName,
+          t.sourceType ? SOURCE_LABELS[t.sourceType] : "",
+        ];
+      }),
+    );
+  });
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -102,14 +130,15 @@ export function TransactionsScreen() {
         description="The complete ledger — every change to stock, and what caused it"
         actions={
           <>
-            <Button variant="outline">
-              <Download />
+            <Button variant="outline" onClick={() => exportCsv.run(undefined)} disabled={exportCsv.isPending}>
+              {exportCsv.isPending ? <Loader2 className="animate-spin" /> : <Download />}
               Export
             </Button>
             <NewTransactionDialog />
           </>
         }
       />
+      <FormError message={exportCsv.error} />
 
       <Alert variant="info">
         <Info />

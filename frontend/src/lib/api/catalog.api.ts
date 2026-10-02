@@ -34,7 +34,7 @@ import type {
   StockPolicy,
   Uom,
 } from "@/types";
-import { httpDelete, httpGet, httpPatch, httpPost, httpPut, validationFailed } from "./client";
+import { httpDelete, httpGet, httpPatch, httpPost, httpPut, httpUpload, validationFailed } from "./client";
 import { toLinkedProduct, type SupplierProductOut } from "./suppliers.api";
 
 /* --------------------------------------------------------- Backend shapes */
@@ -660,6 +660,76 @@ export async function addUomConversion(productVariantId: Id, input: UomConversio
 
 export async function deleteUomConversion(conversionId: Id): Promise<void> {
   await httpDelete(`/catalog/uom-conversions/${conversionId}`);
+}
+
+/* -------------------------------------------- Images & Documents panel */
+
+/** `/catalog/variants/{id}/files` */
+interface ProductFileOut {
+  id: string;
+  document_id: string;
+  product_variant_id: string | null;
+  is_primary: boolean;
+  is_image: boolean;
+  original_filename: string;
+  mime_type: string;
+  file_extension: string;
+  file_size_bytes: number;
+  uploaded_at: string;
+  uploaded_by_name: string;
+  url: string;
+  url_expires_at: string;
+}
+
+export interface ProductFile {
+  id: Id;
+  documentId: Id;
+  isPrimary: boolean;
+  isImage: boolean;
+  filename: string;
+  extension: string;
+  sizeBytes: number;
+  uploadedAt: string;
+  uploadedByName: string;
+  /** Signed and short-lived — refetch the list rather than keep it. */
+  url: string;
+}
+
+const PRODUCT_FILE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "pdf", "docx", "xlsx"];
+export const PRODUCT_FILE_ACCEPT = PRODUCT_FILE_EXTENSIONS.map((e) => `.${e}`).join(",");
+
+function toProductFile(o: ProductFileOut): ProductFile {
+  return {
+    id: o.id,
+    documentId: o.document_id,
+    isPrimary: o.is_primary,
+    isImage: o.is_image,
+    filename: o.original_filename,
+    extension: o.file_extension,
+    sizeBytes: o.file_size_bytes,
+    uploadedAt: o.uploaded_at,
+    uploadedByName: o.uploaded_by_name,
+    url: o.url,
+  };
+}
+
+export async function listProductFiles(productVariantId: Id): Promise<ProductFile[]> {
+  const rows = await httpGet<ProductFileOut[]>(`/catalog/variants/${productVariantId}/files`);
+  return rows.map(toProductFile);
+}
+
+export async function uploadProductFile(productVariantId: Id, file: File): Promise<ProductFile> {
+  const extension = (file.name.split(".").pop() ?? "").toLowerCase();
+  if (!PRODUCT_FILE_EXTENSIONS.includes(extension)) {
+    validationFailed([
+      { field: "file", message: "Upload a photo (.jpg, .png, .webp), a PDF, or a Word or Excel file." },
+    ]);
+  }
+  return toProductFile(await httpUpload<ProductFileOut>(`/catalog/variants/${productVariantId}/files`, file));
+}
+
+export async function removeProductFile(fileId: Id): Promise<void> {
+  await httpDelete(`/catalog/product-files/${fileId}`);
 }
 
 export interface GodownPolicyInput {

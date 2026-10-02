@@ -51,7 +51,14 @@ async def list_documents(
     limit: int = 100,
     offset: int = 0,
 ) -> list[dict]:
-    where = ["d.company_id = :c", "NOT d.is_archived"]
+    where = [
+        "d.company_id = :c",
+        "NOT d.is_archived",
+        # Attachments (product photos, a GRN's challan) live in `documents`
+        # too but were never sent for reading — every AI upload is queued
+        # the moment it lands — so they belong on their record, not here.
+        "d.processing_status <> 'uploaded'",
+    ]
     params: dict = {"c": company_id, "limit": limit, "offset": offset}
     if q:
         where.append("(d.original_filename ILIKE :q OR COALESCE(s.name, '') ILIKE :q)")
@@ -225,6 +232,13 @@ async def get_extraction(session: AsyncSession, *, company_id: str, document_id:
         blocking = "This document has already been approved."
     elif result["review_status"] == "rejected":
         blocking = "This document was rejected."
+    elif not lines:
+        # Checked before the supplier: "no supplier" on a page nothing was
+        # read from sends the reviewer to fix the wrong thing.
+        blocking = (
+            "No line items could be read from this document. Reject it and upload the "
+            "supplier's PDF or spreadsheet, or a sharper image."
+        )
     elif unresolved:
         blocking = (
             f"{len(unresolved)} line{'' if len(unresolved) == 1 else 's'} still need"

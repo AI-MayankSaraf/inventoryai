@@ -9,6 +9,7 @@ import { AsyncBoundary, FormError } from "@/components/common/async-state";
 import { PageHeader } from "@/components/common/page-header";
 import { PermissionGate } from "@/components/common/permission-gate";
 import { SectionCard } from "@/components/common/section-card";
+import { StatusBadge } from "@/components/common/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,7 +48,7 @@ import {
 import { usePermissions } from "@/hooks/use-session";
 import { formatCurrency, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { ComparisonCell, ComparisonRowView, ComparisonView, Id } from "@/types";
+import type { ComparisonCell, ComparisonRowView, ComparisonView, Id, SupplierQuotation } from "@/types";
 
 function shortName(name: string) {
   return name
@@ -59,6 +60,49 @@ function shortName(name: string) {
 function selectedSupplierFor(view: ComparisonView, rfqItemId: Id): Id | null {
   const line = view.lines.find((l) => l.rfqItemId === rfqItemId);
   return line?.selectedSupplierId ?? line?.recommendedSupplierId ?? null;
+}
+
+/**
+ * Quotes are in but none is approved. Only approved quotations are
+ * compared, so say that and link straight to the ones waiting.
+ */
+function NothingApprovedYet({
+  quotations,
+  suppliers,
+}: {
+  quotations: SupplierQuotation[];
+  suppliers: { supplierId: Id; supplierName: string }[];
+}) {
+  const nameOf = (id: Id) => suppliers.find((s) => s.supplierId === id)?.supplierName ?? "Supplier";
+  return (
+    <SectionCard
+      title="No approved quotations yet"
+      description="Only approved quotations are compared. Approve the quotations below, then come back here."
+    >
+      {quotations.length === 0 ? (
+        <p className="px-4 py-6 text-[13px] text-muted-foreground">
+          No quotations have been recorded against this RFQ.
+        </p>
+      ) : (
+        <ul className="divide-y divide-border">
+          {quotations.map((q) => (
+            <li key={q.id} className="flex items-center gap-3 px-4 py-3">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13.5px] font-medium text-foreground">{nameOf(q.supplierId)}</span>
+                <span className="block font-mono text-[12px] text-muted-foreground">{q.quotationNumber}</span>
+              </span>
+              <StatusBadge status={q.status} />
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/procurement/quotations/${q.id}`}>
+                  {q.status === "draft" || q.status === "under_review" ? "Review & approve" : "Open"}
+                </Link>
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </SectionCard>
+  );
 }
 
 export function QuotationComparison({ rfqId }: { rfqId: Id }) {
@@ -137,7 +181,13 @@ export function QuotationComparison({ rfqId }: { rfqId: Id }) {
 
       <AsyncBoundary state={state}>
         {(view) => {
+          if (view === null) {
+            return <NothingApprovedYet quotations={rfqState.data?.quotations ?? []} suppliers={rfqState.data?.suppliers ?? []} />;
+          }
           const suppliers = view.suppliers;
+          // Once converted (or discarded) the selections are history: the
+          // server refuses changes, so the screen does not offer them.
+          const isOpen = view.comparison.status === "draft" || view.comparison.status === "decided";
           const largeDiffs = view.rows.filter((r) => r.priceSpreadPct > 5).length;
 
           return (
@@ -152,7 +202,7 @@ export function QuotationComparison({ rfqId }: { rfqId: Id }) {
                   },
                   {
                     label: "Best Single Supplier",
-                    value: formatCurrency(view.totals.lowestSingleSupplierTotal),
+                    value: view.totals.lowestSingleSupplierId ? formatCurrency(view.totals.lowestSingleSupplierTotal) : "—",
                     hint: suppliers.find((s) => s.supplierId === view.totals.lowestSingleSupplierId)
                       ? shortName(suppliers.find((s) => s.supplierId === view.totals.lowestSingleSupplierId)!.name)
                       : "No single supplier covers every line",
@@ -160,10 +210,13 @@ export function QuotationComparison({ rfqId }: { rfqId: Id }) {
                   {
                     label: "Split Across Suppliers",
                     value: formatCurrency(view.totals.splitTotal),
-                    hint:
-                      view.totals.projectedSavings > 0
-                        ? `Saves ${formatCurrency(view.totals.projectedSavings)} vs single supplier`
-                        : "Same as best single supplier",
+                    hint: !view.totals.lowestSingleSupplierId
+                      ? "Your selection per line, incl. GST"
+                      : view.totals.projectedSavings > 0
+                        ? `Saves ${formatCurrency(view.totals.projectedSavings)} vs best single supplier`
+                        : view.totals.projectedSavings < 0
+                          ? `${formatCurrency(-view.totals.projectedSavings)} more than best single supplier`
+                          : "Same as best single supplier",
                     highlight: true,
                   },
                 ].map((card) => (
@@ -247,7 +300,7 @@ export function QuotationComparison({ rfqId }: { rfqId: Id }) {
                                     <button
                                       type="button"
                                       disabled={!canDecide}
-                                      onClick={() => canDecide && chooseSupplier(view, row, cell)}
+                                      onClick={() => canDecide && isOpen && chooseSupplier(view, row, cell)}
                                       className="w-full text-right outline-none disabled:cursor-default"
                                     >
                                       <span
@@ -386,6 +439,22 @@ export function QuotationComparison({ rfqId }: { rfqId: Id }) {
               <FormError message={selectLine.error} fieldErrors={selectLine.fieldErrors} />
               <FormError message={convert.error} fieldErrors={convert.fieldErrors} />
 
+              {!isOpen && (
+                <div className="flex flex-col gap-2 rounded-xl border border-border bg-muted/40 px-4 py-3 sm:flex-row sm:items-center">
+                  <p className="text-[13.5px] text-foreground">
+                    {view.comparison.status === "converted"
+                      ? "This comparison has been converted to purchase orders. The selections above are what was ordered."
+                      : "This comparison was discarded."}
+                  </p>
+                  {view.comparison.status === "converted" && (
+                    <Button variant="outline" size="sm" asChild className="sm:ml-auto">
+                      <Link href="/procurement/purchase-orders">View purchase orders</Link>
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {isOpen && (
               <PermissionGate permission="comparison.convert">
                 <div className="sticky bottom-0 z-20 flex flex-col gap-3 rounded-xl border border-border bg-card/95 px-4 py-3 shadow-elevated backdrop-blur lg:flex-row lg:items-center">
                   <div className="min-w-0">
@@ -393,7 +462,7 @@ export function QuotationComparison({ rfqId }: { rfqId: Id }) {
                       Creates one purchase order per supplier you&apos;ve chosen across these lines
                     </p>
                     <p className="text-caption text-muted-foreground">
-                      {view.rows.length} items · {formatCurrency(view.totals.splitTotal)} before GST
+                      {view.rows.length} items · {formatCurrency(view.totals.splitTotal)} incl. GST
                       {view.totals.projectedSavings > 0 &&
                         ` · saves ${formatCurrency(view.totals.projectedSavings)}`}
                     </p>
@@ -423,6 +492,7 @@ export function QuotationComparison({ rfqId }: { rfqId: Id }) {
                   </div>
                 </div>
               </PermissionGate>
+              )}
 
               <Dialog open={!!pendingOverride} onOpenChange={(next) => !next && setPendingOverride(null)}>
                 <DialogContent>

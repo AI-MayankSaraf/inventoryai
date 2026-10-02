@@ -82,6 +82,34 @@ async def send_rfq(
     return await rfq_service.send_rfq(session, claims=claims, rfq_id=rfq_id, body=body, request=request)
 
 
+@router.post("/rfqs/{rfq_id}/suppliers", response_model=schemas.RfqOut)
+async def add_rfq_suppliers(
+    rfq_id: UUID,
+    body: schemas.RfqAddSuppliers,
+    request: Request,
+    claims: AccessTokenClaims = Depends(require_permission("rfq.update")),
+    session: AsyncSession = Depends(get_tenant_session),
+):
+    """Draft: the suppliers wait for the send. Sent: they are sent to now
+    (also needs `rfq.send`)."""
+    return await rfq_service.add_suppliers(
+        session, claims=claims, rfq_id=rfq_id, supplier_ids=body.supplier_ids, request=request
+    )
+
+
+@router.delete("/rfqs/{rfq_id}/suppliers/{supplier_id}", response_model=schemas.RfqOut)
+async def remove_rfq_supplier(
+    rfq_id: UUID,
+    supplier_id: UUID,
+    request: Request,
+    claims: AccessTokenClaims = Depends(require_permission("rfq.update")),
+    session: AsyncSession = Depends(get_tenant_session),
+):
+    return await rfq_service.remove_supplier(
+        session, claims=claims, rfq_id=rfq_id, supplier_id=supplier_id, request=request
+    )
+
+
 @router.post("/rfqs/{rfq_id}/cancel", response_model=schemas.RfqOut)
 async def cancel_rfq(
     rfq_id: UUID,

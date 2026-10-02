@@ -34,7 +34,9 @@ from app.modules.ai import providers
 from app.modules.ai.normalise import normalise
 
 #: BR-DOC-01, verified against the sniffed content below rather than trusted.
-SUPPORTED_EXTENSIONS = {"xlsx", "xls", "csv", "pdf", "docx", "jpg", "jpeg", "png"}
+SUPPORTED_EXTENSIONS = {"xlsx", "xls", "csv", "pdf", "docx", "jpg", "jpeg", "png", "webp"}
+
+IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 
 #: What a file actually is, by its first bytes. An `.xlsx` that is really an
 #: executable, or a `.pdf` that is really a zip, never reaches a parser.
@@ -100,6 +102,12 @@ def sniff(blob: bytes, extension: str) -> str:
         raise UnsupportedFile(
             f".{ext} files are not supported. Upload a spreadsheet, CSV, PDF, Word file or photo."
         )
+    image = _image_format(blob)
+    if image and ext in IMAGE_EXTENSIONS:
+        # "Save image as" routinely writes a WebP or JPEG under a .png name.
+        # Every image goes to the same OCR path, so the extension only has
+        # to say "image"; the bytes decide which kind.
+        return image
     for magic, group in _MAGIC:
         if blob.startswith(magic):
             if ext in group:
@@ -118,6 +126,16 @@ def sniff(blob: bytes, extension: str) -> str:
     raise UnsupportedFile("This file type could not be recognised.", code="FILE_CONTENT_MISMATCH")
 
 
+def _image_format(blob: bytes) -> Optional[str]:
+    if blob.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if blob.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if blob[:4] == b"RIFF" and blob[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
 def parse(blob: bytes, extension: str, hints: Optional[set[str]] = None) -> ParsedDocument:
     """`hints` are normalised words known to be column headings — pass the
     canonical vocabulary's synonyms so the header row is found by meaning
@@ -129,7 +147,7 @@ def parse(blob: bytes, extension: str, hints: Optional[set[str]] = None) -> Pars
         return _parse_xlsx(blob, hints)
     if ext == "pdf":
         return _parse_pdf(blob, hints)
-    if ext in {"jpg", "jpeg", "png"}:
+    if ext in IMAGE_EXTENSIONS:
         return _parse_image(blob, ext, hints)
     if ext == "docx":
         return _parse_docx(blob, hints)
@@ -149,22 +167,30 @@ def _is_headerish(cell: str) -> bool:
     return not re.fullmatch(r"[\d\s.,%₹/-]+", text)
 
 
+def _hinted_header_row(grid: list[list[str]], hints: Optional[set[str]], limit: int = 25) -> Optional[int]:
+    """The row containing the most known column headings, if any row has
+    at least two. `None` when the vocabulary recognises nothing."""
+    if not hints:
+        return None
+    best_index, best_score = None, 0
+    for index, row in enumerate(grid[:limit]):
+        score = sum(1 for cell in row if normalise(cell) in hints)
+        # Two recognised headings is already far better evidence than
+        # "three cells with letters in them"; one could be a coincidence.
+        if score >= 2 and score > best_score:
+            best_index, best_score = index, score
+    return best_index
+
+
 def _find_header_row(grid: list[list[str]], hints: Optional[set[str]] = None) -> int:
     """Which row holds the column headings.
 
     Scanning only the first 25 rows on purpose — a heading further down
     than that is not a letterhead, it is a different document.
     """
-    if hints:
-        best_index, best_score = -1, 0
-        for index, row in enumerate(grid[:25]):
-            score = sum(1 for cell in row if normalise(cell) in hints)
-            # Two recognised headings is already far better evidence than
-            # "three cells with letters in them"; one could be a coincidence.
-            if score >= 2 and score > best_score:
-                best_index, best_score = index, score
-        if best_index >= 0:
-            return best_index
+    hinted = _hinted_header_row(grid, hints)
+    if hinted is not None:
+        return hinted
 
     for index, row in enumerate(grid[:25]):
         if sum(1 for cell in row if _is_headerish(cell)) >= 3:
@@ -183,6 +209,15 @@ def _table_from_grid(grid: list[list[str]], sheet_name: str, hints: Optional[set
         headers.pop()
     if not headers:
         return None
+    # Two columns both headed "Amount" (or, from OCR, both read as the same
+    # smudge) are still two columns. The mapping is keyed by heading text,
+    # so the second becomes "Amount (2)" rather than colliding with the first.
+    seen: dict[str, int] = {}
+    for index, header in enumerate(headers):
+        key = normalise(header)
+        seen[key] = seen.get(key, 0) + 1
+        if seen[key] > 1:
+            headers[index] = f"{header} ({seen[key]})"
     width = len(headers)
 
     rows: list[list[str]] = []
@@ -305,7 +340,34 @@ def _parse_image(blob: bytes, ext: str, hints: Optional[set[str]] = None) -> Par
         doc.notes.append(f"Rebuilt a {len(best.headers)}-column table with {len(best.rows)} rows from the image.")
     else:
         doc.notes.append("No table could be rebuilt from the image; only the header fields could be read.")
+        width = _image_width(blob)
+        if width and width < _MIN_READABLE_WIDTH:
+            # The usual reason, and the one the person can act on: a page
+            # saved small (a screenshot, an image from a website) has text a
+            # few pixels high, and no amount of OCR recovers detail that is
+            # not in the file.
+            doc.notes.append(
+                f"The image is only {width} pixels wide, so the text on it is too small to read. "
+                f"Upload the supplier's PDF or Excel file, or a photo or scan at least "
+                f"{_MIN_READABLE_WIDTH} pixels wide."
+            )
     return doc
+
+
+#: Below this, a full-page document's body text is under ~10 px high —
+#: the size at which Tesseract stops reading it, measured on a real
+#: quotation (676 px wide: 4 of 11 table values read at best).
+_MIN_READABLE_WIDTH = 1200
+
+
+def _image_width(blob: bytes) -> Optional[int]:
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(blob)) as image:
+            return image.width
+    except Exception:
+        return None
 
 
 def _parse_docx(blob: bytes, hints: Optional[set[str]] = None) -> ParsedDocument:

@@ -287,9 +287,11 @@ export function ExtractionReview({ documentId }: { documentId: string }) {
                 <SectionCard
                   title="Line Items"
                   description={
-                    view.unresolvedCount > 0
-                      ? `${view.unresolvedCount} item${view.unresolvedCount === 1 ? "" : "s"} could not be matched to your catalogue`
-                      : "All items matched to your catalogue"
+                    view.lines.length === 0
+                      ? "No line items could be read from this document"
+                      : view.unresolvedCount > 0
+                        ? `${view.unresolvedCount} item${view.unresolvedCount === 1 ? "" : "s"} could not be matched to your catalogue`
+                        : "All items matched to your catalogue"
                   }
                 >
                   <ul className="divide-y divide-border">
@@ -527,10 +529,18 @@ export function ExtractionReview({ documentId }: { documentId: string }) {
                 {!reviewed && (
                   <div className="sticky bottom-0 z-20 flex flex-col gap-2 rounded-xl border border-border bg-card/95 px-4 py-3 shadow-elevated backdrop-blur sm:flex-row sm:items-center">
                     <p className="text-[13px] text-muted-foreground">
-                      {blockers === 0 ? (
+                      {blockers === 0 && view.canApprove ? (
                         <span className="flex items-center gap-1.5 text-success-subtle-foreground">
                           <CircleCheck className="size-4" />
                           Everything reviewed — ready to approve
+                        </span>
+                      ) : blockers === 0 ? (
+                        // Nothing left to review, yet the server still says
+                        // no — no lines read, no supplier. Say why, rather
+                        // than "ready" beside a disabled button.
+                        <span className="flex items-center gap-1.5 text-warning-subtle-foreground">
+                          <TriangleAlert className="size-4" />
+                          {view.blockingReason ?? "This extraction cannot be approved yet."}
                         </span>
                       ) : (
                         <span className="flex items-center gap-1.5 text-warning-subtle-foreground">

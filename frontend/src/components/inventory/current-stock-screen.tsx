@@ -2,11 +2,11 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { AlertTriangle, Download, IndianRupee, Package, PackageX } from "lucide-react";
+import { AlertTriangle, Download, IndianRupee, Loader2, Package, PackageX } from "lucide-react";
 
 import { PageHeader } from "@/components/common/page-header";
 import { KpiCard } from "@/components/common/kpi-card";
-import { AsyncBoundary } from "@/components/common/async-state";
+import { AsyncBoundary, FormError } from "@/components/common/async-state";
 import { DataToolbar, TablePagination } from "@/components/common/data-toolbar";
 import { FilterSelect } from "@/components/common/filter-select";
 import { StatusBadge } from "@/components/common/status-badge";
@@ -22,9 +22,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useCategories, useGodowns } from "@/hooks/use-catalog";
-import { useListControls } from "@/hooks/use-api";
+import { useApiMutation, useListControls } from "@/hooks/use-api";
 import { useInventoryKpis, useStock } from "@/hooks/use-inventory";
 import { usePermissions } from "@/hooks/use-session";
+import { inventoryApi } from "@/lib/api";
+import { downloadCsv } from "@/lib/csv";
 import { formatCurrency, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { StockRow, StockState } from "@/types";
@@ -55,18 +57,39 @@ export function CurrentStockScreen() {
   const stockState = useStock(controls.params);
   const kpisState = useInventoryKpis(controls.filters.godownId);
 
+  // Every row the current search and filters match — not just this page.
+  const exportCsv = useApiMutation(async () => {
+    const all = await inventoryApi.listStock({ ...controls.params, cursor: null, limit: 100_000 });
+    downloadCsv(
+      "current-stock",
+      ["Product", "Category", "SKU", "Brand", "Godown", "Stock Qty", "Unit", "Value (INR)", "Status"],
+      all.items.map((r) => [
+        r.productName,
+        r.categoryName,
+        r.sku,
+        r.brandName,
+        r.godownName,
+        r.quantity,
+        r.uomCode,
+        r.value,
+        STATUS_OPTIONS.find((o) => o.value === r.status)?.label ?? r.status,
+      ]),
+    );
+  });
+
   return (
     <div className="space-y-5">
       <PageHeader
         title="Current Stock"
         description="Real-time inventory across all godowns"
         actions={
-          <Button variant="outline">
-            <Download />
+          <Button variant="outline" onClick={() => exportCsv.run(undefined)} disabled={exportCsv.isPending}>
+            {exportCsv.isPending ? <Loader2 className="animate-spin" /> : <Download />}
             Export
           </Button>
         }
       />
+      <FormError message={exportCsv.error} />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="Total SKUs" value={formatNumber(kpisState.data?.totalSkus ?? 0)} icon={Package} />

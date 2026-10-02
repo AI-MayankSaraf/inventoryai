@@ -145,6 +145,25 @@ class ConversionOut(BaseModel):
     is_purchase_default: bool
 
 
+# ------------------------------------------- product images & documents
+
+class ProductFileOut(BaseModel):
+    id: UUID
+    document_id: UUID
+    product_variant_id: Optional[UUID]
+    is_primary: bool
+    is_image: bool
+    original_filename: str
+    mime_type: str
+    file_extension: str
+    file_size_bytes: int
+    uploaded_at: datetime
+    uploaded_by_name: str
+    #: Signed, expires in minutes (BR-DOC-03) — re-list for a fresh one.
+    url: str
+    url_expires_at: datetime
+
+
 # --------------------------------------------- per-godown reorder levels
 
 class GodownPolicyIn(BaseModel):

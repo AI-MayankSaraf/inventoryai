@@ -99,11 +99,65 @@ async def list_rfqs(
             params,
         )
     ).mappings().all()
-    return [{**dict(r), "items": [], "suppliers": []} for r in rows]
+    if not rows:
+        return []
+
+    # The list screens count suppliers, quotes in and items per RFQ, and the
+    # Quotation Comparison chooser shows only RFQs with a quote — so these
+    # cannot be left empty. Two queries for the whole page, not one per RFQ.
+    ids = [r["id"] for r in rows]
+    by_rfq: dict = {rid: {"items": [], "suppliers": []} for rid in ids}
+    for kind, sql in (
+        (
+            "items",
+            "SELECT rfq_id, id, line_no, product_variant_id, description, quantity, uom_id, expected_price, "
+            "target_delivery_date, remarks FROM rfq_items WHERE company_id = :c AND rfq_id = ANY(CAST(:ids AS uuid[])) "
+            "ORDER BY line_no",
+        ),
+        (
+            "suppliers",
+            "SELECT rfq_id, id, supplier_id, status, sent_at, responded_at FROM rfq_suppliers "
+            "WHERE company_id = :c AND rfq_id = ANY(CAST(:ids AS uuid[])) ORDER BY sent_at NULLS LAST",
+        ),
+    ):
+        for child in (await session.execute(text(sql), {"c": company_id, "ids": ids})).mappings().all():
+            entry = dict(child)
+            by_rfq[entry.pop("rfq_id")][kind].append(entry)
+    return [{**dict(r), **by_rfq[r["id"]]} for r in rows]
 
 
 async def get_rfq(session: AsyncSession, *, company_id: str, rfq_id: UUID) -> dict:
     return await _load(session, company_id=company_id, rfq_id=rfq_id)
+
+
+async def _active_suppliers(
+    session: AsyncSession, company_id: str, supplier_ids: list[UUID], *, require_email: bool
+) -> list[dict]:
+    """The suppliers, each active and in this company — or a 404/422 naming
+    the ones that are not. An email is required only to actually send
+    (BR-RFQ-03); a draft may list a supplier whose address is added later."""
+    suppliers = (
+        await session.execute(
+            text(
+                "SELECT id, name, email FROM suppliers WHERE company_id = :c AND id = ANY(CAST(:ids AS uuid[])) "
+                "AND status = 'active' AND deleted_at IS NULL"
+            ),
+            {"c": company_id, "ids": list(supplier_ids)},
+        )
+    ).mappings().all()
+    missing = set(supplier_ids) - {r["id"] for r in suppliers}
+    if missing:
+        raise ApiError(status.HTTP_404_NOT_FOUND, CODE_NOT_FOUND, f"Supplier(s) not found or inactive: {missing}")
+    if require_email:
+        missing_email = [r["name"] for r in suppliers if not r["email"]]
+        if missing_email:
+            # BR-RFQ-03
+            raise ApiError(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                CODE_SUPPLIER_EMAIL_MISSING,
+                f"These suppliers have no email address: {', '.join(missing_email)}",
+            )
+    return [dict(r) for r in suppliers]
 
 
 async def _insert_items(session: AsyncSession, *, company_id: str, rfq_id: UUID, items: list) -> float:
@@ -187,6 +241,17 @@ async def create_rfq(
         await session.execute(
             text("UPDATE rfqs SET estimated_value = :v WHERE id = :id"), {"v": estimated_value, "id": rfq_id}
         )
+    if body.supplier_ids:
+        supplier_ids = list(dict.fromkeys(body.supplier_ids))
+        await _active_suppliers(session, claims.company_id, supplier_ids, require_email=False)
+        for supplier_id in supplier_ids:
+            await session.execute(
+                text(
+                    "INSERT INTO rfq_suppliers (company_id, rfq_id, supplier_id, status) "
+                    "VALUES (:c, :rfq_id, :supplier_id, 'pending')"
+                ),
+                {"c": claims.company_id, "rfq_id": rfq_id, "supplier_id": supplier_id},
+            )
 
     result = await _load(session, company_id=claims.company_id, rfq_id=rfq_id)
     await audit.record(
@@ -285,29 +350,26 @@ async def send_rfq(
         # BR-RFQ-01
         raise ApiError(status.HTTP_422_UNPROCESSABLE_ENTITY, CODE_NO_ITEMS, "An RFQ needs at least one item before it can be sent")
 
-    suppliers = (
-        await session.execute(
-            text(
-                "SELECT id, name, email FROM suppliers WHERE company_id = :c AND id = ANY(CAST(:ids AS uuid[])) "
-                "AND status = 'active' AND deleted_at IS NULL"
-            ),
-            {"c": claims.company_id, "ids": list(body.supplier_ids)},
-        )
-    ).mappings().all()
-    found_ids = {r["id"] for r in suppliers}
-    missing = set(body.supplier_ids) - found_ids
-    if missing:
-        raise ApiError(status.HTTP_404_NOT_FOUND, CODE_NOT_FOUND, f"Supplier(s) not found or inactive: {missing}")
-    missing_email = [r["name"] for r in suppliers if not r["email"]]
-    if missing_email:
-        # BR-RFQ-03
+    # No list in the request means "the suppliers chosen on this draft".
+    supplier_ids = list(body.supplier_ids) or [s["supplier_id"] for s in before["suppliers"]]
+    if not supplier_ids:
         raise ApiError(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            CODE_SUPPLIER_EMAIL_MISSING,
-            f"These suppliers have no email address: {', '.join(missing_email)}",
+            CODE_VALIDATION,
+            "Add at least one supplier before sending this RFQ",
         )
+    await _active_suppliers(session, claims.company_id, supplier_ids, require_email=True)
+    # Suppliers picked on the draft but left out of an explicit send list
+    # were not sent to; they must not linger as "pending" on a sent RFQ.
+    await session.execute(
+        text(
+            "DELETE FROM rfq_suppliers WHERE company_id = :c AND rfq_id = :rfq_id AND status = 'pending' "
+            "AND NOT (supplier_id = ANY(CAST(:ids AS uuid[])))"
+        ),
+        {"c": claims.company_id, "rfq_id": rfq_id, "ids": supplier_ids},
+    )
 
-    for supplier_id in body.supplier_ids:
+    for supplier_id in supplier_ids:
         await session.execute(
             text(
                 "INSERT INTO rfq_suppliers (company_id, rfq_id, supplier_id, status, sent_at, sent_channel) "
@@ -330,7 +392,115 @@ async def send_rfq(
         claims=claims,
         entity_id=rfq_id,
         entity_label=after["rfq_number"],
-        description=f"Sent to {len(body.supplier_ids)} supplier(s)",
+        description=f"Sent to {len(supplier_ids)} supplier(s)",
+        before=before,
+        after=after,
+        request=request,
+    )
+    await session.commit()
+    return after
+
+
+async def add_suppliers(
+    session: AsyncSession,
+    *,
+    claims: AccessTokenClaims,
+    rfq_id: UUID,
+    supplier_ids: list[UUID],
+    request: Optional[Request] = None,
+) -> dict:
+    """Add suppliers to an RFQ. On a draft they wait as `pending` for the
+    send; on a sent RFQ they are sent to now — only them, so suppliers who
+    already have the RFQ are not sent it twice."""
+    before = await _load(session, company_id=claims.company_id, rfq_id=rfq_id)
+    if before["status"] not in ("draft", "sent"):
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            CODE_INVALID_STATE_TRANSITION,
+            f"Suppliers can only be added to a draft or sent RFQ (current status: {before['status']})",
+        )
+    sending = before["status"] == "sent"
+    if sending and "rfq.send" not in claims.permissions:
+        raise ApiError(status.HTTP_403_FORBIDDEN, "FORBIDDEN", "Missing permission: rfq.send")
+
+    already = {s["supplier_id"] for s in before["suppliers"]}
+    new_ids = [s for s in dict.fromkeys(supplier_ids) if s not in already]
+    if not new_ids:
+        raise ApiError(status.HTTP_409_CONFLICT, CODE_VALIDATION, "These suppliers are already on this RFQ")
+    added = await _active_suppliers(session, claims.company_id, new_ids, require_email=sending)
+
+    for supplier_id in new_ids:
+        await session.execute(
+            text(
+                "INSERT INTO rfq_suppliers (company_id, rfq_id, supplier_id, status, sent_at, sent_channel) "
+                "VALUES (:c, :rfq_id, :supplier_id, :status, CASE WHEN :sending THEN now() END, :channel)"
+            ),
+            {
+                "c": claims.company_id,
+                "rfq_id": rfq_id,
+                "supplier_id": supplier_id,
+                "status": "sent" if sending else "pending",
+                "sending": sending,
+                "channel": "email" if sending else None,
+            },
+        )
+
+    after = await _load(session, company_id=claims.company_id, rfq_id=rfq_id)
+    names = ", ".join(s["name"] for s in added)
+    await audit.record(
+        session,
+        entity_type="rfq",
+        action="sent" if sending else "updated",
+        claims=claims,
+        entity_id=rfq_id,
+        entity_label=after["rfq_number"],
+        description=f"{'Sent to' if sending else 'Supplier(s) added'}: {names}",
+        before=before,
+        after=after,
+        request=request,
+    )
+    await session.commit()
+    return after
+
+
+async def remove_supplier(
+    session: AsyncSession,
+    *,
+    claims: AccessTokenClaims,
+    rfq_id: UUID,
+    supplier_id: UUID,
+    request: Optional[Request] = None,
+) -> dict:
+    """Take a supplier off a draft. Once sent, the supplier has the RFQ —
+    removing the row would only hide that, so it is refused."""
+    before = await _load(session, company_id=claims.company_id, rfq_id=rfq_id)
+    if before["status"] != "draft":
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            CODE_INVALID_STATE_TRANSITION,
+            "Suppliers can only be removed while the RFQ is a draft",
+        )
+    deleted = (
+        await session.execute(
+            text(
+                "DELETE FROM rfq_suppliers WHERE company_id = :c AND rfq_id = :rfq_id AND supplier_id = :s "
+                "RETURNING id"
+            ),
+            {"c": claims.company_id, "rfq_id": rfq_id, "s": supplier_id},
+        )
+    ).first()
+    if deleted is None:
+        raise ApiError(status.HTTP_404_NOT_FOUND, CODE_NOT_FOUND, "That supplier is not on this RFQ")
+
+    after = await _load(session, company_id=claims.company_id, rfq_id=rfq_id)
+    await audit.record(
+        session,
+        entity_type="rfq",
+        action="updated",
+        claims=claims,
+        entity_id=rfq_id,
+        entity_label=after["rfq_number"],
+        description="Supplier removed",
         before=before,
         after=after,
         request=request,

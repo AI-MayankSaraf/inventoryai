@@ -30,6 +30,22 @@ export function useSendRfq(onSuccess?: () => void) {
   return useApiMutation(procurementApi.sendRfq, { onSuccess });
 }
 
+export function useAddRfqSuppliers(rfqId: Id, onSuccess?: () => void) {
+  const action = useCallback(
+    (supplierIds: Id[]) => procurementApi.addRfqSuppliers(rfqId, supplierIds),
+    [rfqId],
+  );
+  return useApiMutation(action, { onSuccess: () => onSuccess?.() });
+}
+
+export function useRemoveRfqSupplier(rfqId: Id, onSuccess?: () => void) {
+  const action = useCallback(
+    (supplierId: Id) => procurementApi.removeRfqSupplier(rfqId, supplierId),
+    [rfqId],
+  );
+  return useApiMutation(action, { onSuccess: () => onSuccess?.() });
+}
+
 /**
  * The import preview, re-run whenever the file or the mapping changes.
  * Only the latest request's answer is kept: changing two dropdowns quickly

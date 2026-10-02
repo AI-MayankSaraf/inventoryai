@@ -62,6 +62,23 @@ class SourceDocumentOut(BaseModel):
     linked_at: Optional[datetime] = None
 
 
+class AttachmentOut(BaseModel):
+    link_id: UUID
+    document_id: UUID
+    original_filename: str
+    mime_type: str
+    file_extension: str
+    file_size_bytes: int
+    document_type: Optional[str] = None
+    uploaded_at: datetime
+    uploaded_by_name: str
+    link_role: str
+    is_image: bool
+    #: Signed, expires in minutes (BR-DOC-03) — re-list for a fresh one.
+    url: str
+    url_expires_at: datetime
+
+
 class JobStatusOut(BaseModel):
     document_id: UUID
     job_id: Optional[UUID] = None

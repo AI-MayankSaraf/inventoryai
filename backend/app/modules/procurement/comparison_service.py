@@ -57,8 +57,17 @@ async def _company_weights(session: AsyncSession, *, company_id: str) -> dict:
 
 
 async def _gather_matrix(
-    session: AsyncSession, *, company_id: str, rfq_id: UUID, supplier_ids: list[UUID], weights: dict
+    session: AsyncSession,
+    *,
+    company_id: str,
+    rfq_id: UUID,
+    supplier_ids: list[UUID],
+    weights: dict,
+    statuses: tuple[str, ...] = ("approved",),
 ) -> dict:
+    """`statuses`: which quotations take part. An open comparison weighs
+    only approved ones; a converted comparison must also show the ones it
+    converted, or the supplier actually chosen drops off its own screen."""
     rfq_items = (
         await session.execute(
             text(
@@ -74,10 +83,10 @@ async def _gather_matrix(
             text(
                 "SELECT id, supplier_id, quotation_number, valid_until, total_amount, taxable_value, "
                 "freight_amount, other_charges, delivery_period_days "
-                "FROM supplier_quotations WHERE company_id = :c AND rfq_id = :rfq_id AND status = 'approved' "
-                "AND supplier_id = ANY(CAST(:ids AS uuid[]))"
+                "FROM supplier_quotations WHERE company_id = :c AND rfq_id = :rfq_id "
+                "AND status = ANY(CAST(:statuses AS text[])) AND supplier_id = ANY(CAST(:ids AS uuid[]))"
             ),
-            {"c": company_id, "rfq_id": rfq_id, "ids": supplier_ids},
+            {"c": company_id, "rfq_id": rfq_id, "ids": supplier_ids, "statuses": list(statuses)},
         )
     ).mappings().all()
     quotation_ids = [q["id"] for q in quotations]
@@ -237,7 +246,7 @@ async def _gather_matrix(
             for row in rows_out
         }
         if all(rows_for_q.values()):
-            full_coverage_totals.append((q["id"], sum(D(c["line_total"]) for c in rows_for_q.values())))
+            full_coverage_totals.append((q["supplier_id"], sum(D(c["line_total"]) for c in rows_for_q.values())))
     single_supplier_best = min(full_coverage_totals, key=lambda t: t[1]) if full_coverage_totals else None
 
     split_total = Decimal("0")
@@ -252,6 +261,7 @@ async def _gather_matrix(
         "suppliers": suppliers_out,
         "warnings": warnings,
         "single_supplier_best_total": float(single_supplier_best[1]) if single_supplier_best else None,
+        "single_supplier_best_supplier_id": single_supplier_best[0] if single_supplier_best else None,
         "split_total": float(split_total) if rows_out else None,
     }
 
@@ -272,7 +282,12 @@ async def _load(session: AsyncSession, *, company_id: str, comparison_id: UUID) 
 
     weights = await _company_weights(session, company_id=company_id)
     matrix = await _gather_matrix(
-        session, company_id=company_id, rfq_id=header["rfq_id"], supplier_ids=list(header["compared_supplier_ids"] or []), weights=weights
+        session,
+        company_id=company_id,
+        rfq_id=header["rfq_id"],
+        supplier_ids=list(header["compared_supplier_ids"] or []),
+        weights=weights,
+        statuses=("approved", "converted") if header["status"] == "converted" else ("approved",),
     )
 
     lines = (
@@ -301,7 +316,27 @@ async def _load(session: AsyncSession, *, company_id: str, comparison_id: UUID) 
             }
         )
 
+    # The summary is worked out from the table being returned, not read
+    # from the columns saved at build time: those go stale as soon as a
+    # quotation is approved, rejected or converted, and then the cards
+    # disagree with the grid under them. "Split" follows each line's
+    # selection — what Convert will actually order — falling back to the
+    # recommendation where nothing was picked.
+    split_total = Decimal("0")
+    for row in rows:
+        chosen = row["selected_quotation_item_id"] or row["recommended_quotation_item_id"]
+        cell = next((c for c in row["cells"] if c["quotation_item_id"] == chosen), None)
+        if cell:
+            split_total += D(cell["line_total"])
+    single_best = matrix["single_supplier_best_total"]
+
     out = dict(header)
+    out["single_supplier_best_total"] = single_best
+    out["single_supplier_best_supplier_id"] = matrix["single_supplier_best_supplier_id"]
+    out["split_total"] = float(split_total) if rows else None
+    out["projected_savings"] = (
+        float(D(single_best) - split_total) if single_best is not None and rows else None
+    )
     out["rows"] = rows
     out["suppliers"] = matrix["suppliers"]
     out["warnings"] = matrix["warnings"]

@@ -14,12 +14,13 @@ Permission choices (07_RBAC_MATRIX.md §2):
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_tenant_session, require_permission
 from app.core.security import AccessTokenClaims
 from app.modules.catalog import detail_service as svc
+from app.modules.catalog import product_files
 from app.modules.catalog import detail_schemas as s
 
 router = APIRouter(prefix="/catalog", tags=["catalog-detail"])
@@ -210,6 +211,44 @@ async def delete_conversion(
     session: AsyncSession = Depends(get_tenant_session),
 ) -> None:
     await svc.delete_conversion(session, claims=claims, conversion_id=conversion_id, request=request)
+
+
+@router.get("/variants/{variant_id}/files", response_model=list[s.ProductFileOut])
+async def list_product_files(
+    variant_id: UUID,
+    claims: AccessTokenClaims = Depends(require_permission("product.view")),
+    session: AsyncSession = Depends(get_tenant_session),
+):
+    return await product_files.list_files(session, claims=claims, variant_id=variant_id)
+
+
+@router.post("/variants/{variant_id}/files", response_model=s.ProductFileOut, status_code=status.HTTP_201_CREATED)
+async def upload_product_file(
+    variant_id: UUID,
+    request: Request,
+    file: UploadFile = File(...),
+    claims: AccessTokenClaims = Depends(require_permission("product.update")),
+    session: AsyncSession = Depends(get_tenant_session),
+):
+    return await product_files.upload_file(
+        session,
+        claims=claims,
+        variant_id=variant_id,
+        blob=await file.read(),
+        filename=file.filename or "file",
+        mime_type=file.content_type or "application/octet-stream",
+        request=request,
+    )
+
+
+@router.delete("/product-files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_product_file(
+    file_id: UUID,
+    request: Request,
+    claims: AccessTokenClaims = Depends(require_permission("product.update")),
+    session: AsyncSession = Depends(get_tenant_session),
+) -> None:
+    await product_files.remove_file(session, claims=claims, file_id=file_id, request=request)
 
 
 @router.get("/variants/{variant_id}/godown-policies", response_model=list[s.GodownPolicyOut])

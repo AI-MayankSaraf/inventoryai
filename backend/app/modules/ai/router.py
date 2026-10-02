@@ -34,11 +34,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import audit, storage
 from app.core.config import get_settings
 from app.core.db import commit_and_rescope, set_tenant
-from app.core.deps import get_tenant_session, require_permission, scoped_godown_filter
+from app.core.deps import get_current_claims, get_tenant_session, require_permission, scoped_godown_filter
 from app.core.errors import CODE_DUPLICATE, CODE_NOT_FOUND, CODE_RECORD_IN_USE, CODE_VALIDATION, ApiError
 from app.core.security import AccessTokenClaims
 from app.modules.ai import (
     assistant_service,
+    attachments,
     embedding_service,
     extraction_service,
     mapping_review_service,
@@ -315,6 +316,58 @@ async def delete_document(
     # After the commit: the row is gone for good, so the bytes can go too.
     # If this fails the object is an orphan `scripts/s3_orphans.py` finds.
     await storage.adelete_quietly(deleted["storage_key"])
+
+
+# Attachments: permission is per record type (a GRN's challan needs
+# `grn.*`, not `document.*`), so it is checked in `attachments`, not here.
+
+@router.get("/attachments/{linked_type}/{linked_id}", response_model=list[schemas.AttachmentOut])
+async def list_attachments(
+    linked_type: str,
+    linked_id: UUID,
+    claims: AccessTokenClaims = Depends(get_current_claims),
+    session: AsyncSession = Depends(get_tenant_session),
+):
+    return await attachments.list_for_record(session, claims=claims, linked_type=linked_type, linked_id=linked_id)
+
+
+@router.post(
+    "/attachments/{linked_type}/{linked_id}",
+    response_model=schemas.AttachmentOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_attachment(
+    linked_type: str,
+    linked_id: UUID,
+    request: Request,
+    file: UploadFile = File(...),
+    claims: AccessTokenClaims = Depends(get_current_claims),
+    session: AsyncSession = Depends(get_tenant_session),
+):
+    return await attachments.attach_to_record(
+        session,
+        claims=claims,
+        linked_type=linked_type,
+        linked_id=linked_id,
+        blob=await file.read(),
+        filename=file.filename or "file",
+        mime_type=file.content_type or "application/octet-stream",
+        request=request,
+    )
+
+
+@router.delete("/attachments/{linked_type}/{linked_id}/{link_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_attachment(
+    linked_type: str,
+    linked_id: UUID,
+    link_id: UUID,
+    request: Request,
+    claims: AccessTokenClaims = Depends(get_current_claims),
+    session: AsyncSession = Depends(get_tenant_session),
+) -> None:
+    await attachments.remove_from_record(
+        session, claims=claims, linked_type=linked_type, linked_id=linked_id, link_id=link_id, request=request
+    )
 
 
 @router.get("/sources/{linked_type}/{linked_id}", response_model=list[schemas.SourceDocumentOut])

@@ -63,6 +63,20 @@ export function useSourceDocuments(linkedType: documentsApi.LinkedRecordType, li
   );
 }
 
+export function useAttachments(linkedType: documentsApi.AttachableRecordType, linkedId: Id) {
+  return useApiQuery(["attachments", linkedType, linkedId], () =>
+    documentsApi.listAttachments(linkedType, linkedId),
+  );
+}
+
+export function useUploadAttachment(onSuccess?: () => void) {
+  return useApiMutation(documentsApi.uploadAttachment, { onSuccess: () => onSuccess?.() });
+}
+
+export function useRemoveAttachment(onSuccess?: () => void) {
+  return useApiMutation(documentsApi.removeAttachment, { onSuccess: () => onSuccess?.() });
+}
+
 export function useUploadDocument(onSuccess?: (result: { document: { id: Id } }) => void) {
   return useApiMutation(documentsApi.uploadDocument, { onSuccess });
 }

@@ -33,6 +33,7 @@ import {
 import { useCategories, useGodowns } from "@/hooks/use-catalog";
 import { useReport, useReports } from "@/hooks/use-ops";
 import { useSuppliers } from "@/hooks/use-suppliers";
+import { downloadCsv } from "@/lib/csv";
 import { formatCurrency, formatDate, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ReportResult } from "@/types";
@@ -121,30 +122,14 @@ function display(column: Column, value: unknown): string {
 }
 
 /** CSV of exactly what is on screen (filters applied), totals last. */
-function downloadCsv(report: ReportResult, name: string) {
-  const cell = (v: unknown) => {
-    const s = v === null || v === undefined ? "" : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const lines = [report.columns.map((c) => cell(c.label)).join(",")];
-  for (const row of report.rows) {
-    lines.push(report.columns.map((c) => cell(CODED.has(c.key) && row[c.key] ? humanize(String(row[c.key])) : row[c.key])).join(","));
-  }
+function exportReport(report: ReportResult, name: string) {
+  const rows: unknown[][] = report.rows.map((row) =>
+    report.columns.map((c) => (CODED.has(c.key) && row[c.key] ? humanize(String(row[c.key])) : row[c.key])),
+  );
   if (report.totals) {
-    lines.push(report.columns.map((c, i) => cell(i === 0 ? "Total" : report.totals?.[c.key])).join(","));
+    rows.push(report.columns.map((c, i) => (i === 0 ? "Total" : report.totals?.[c.key])));
   }
-  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${isoDay(new Date())}.csv`;
-  // Firefox ignores clicks on a detached anchor, and revoking the URL in the
-  // same tick can cancel the download before the browser has read the blob.
-  a.style.display = "none";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadCsv(name, report.columns.map((c) => c.label), rows);
 }
 
 export default function ReportsPage() {
@@ -263,7 +248,7 @@ export default function ReportsPage() {
                 variant="outline"
                 size="sm"
                 disabled={!result.data || result.data.rows.length === 0}
-                onClick={() => result.data && downloadCsv(result.data, definition.name)}
+                onClick={() => result.data && exportReport(result.data, definition.name)}
               >
                 <Download />
                 Export CSV

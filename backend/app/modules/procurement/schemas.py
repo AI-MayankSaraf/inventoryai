@@ -53,6 +53,8 @@ class RfqCreate(BaseModel):
     delivery_godown_id: Optional[UUID] = None
     notes: Optional[str] = None
     items: list[RfqItemIn] = Field(default_factory=list)
+    #: Recorded as `pending` on the draft; `/send` later sends to them.
+    supplier_ids: list[UUID] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _dates(self) -> "RfqCreate":
@@ -103,6 +105,11 @@ class RfqOut(BaseModel):
 
 
 class RfqSendRequest(BaseModel):
+    #: Empty means "the suppliers already recorded on this draft".
+    supplier_ids: list[UUID] = Field(default_factory=list)
+
+
+class RfqAddSuppliers(BaseModel):
     supplier_ids: list[UUID] = Field(min_length=1)
 
 
@@ -669,6 +676,8 @@ class ComparisonOut(BaseModel):
     strategy: str
     status: str
     single_supplier_best_total: Optional[float]
+    #: Who that total belongs to — named, not inferred from matching totals.
+    single_supplier_best_supplier_id: Optional[UUID] = None
     split_total: Optional[float]
     projected_savings: Optional[float]
     notes: Optional[str]

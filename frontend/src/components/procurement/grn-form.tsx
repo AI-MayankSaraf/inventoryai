@@ -5,15 +5,16 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   CalendarDays,
-  FileUp,
   Import,
   Info,
   PackageSearch,
   TriangleAlert,
   Truck,
+  X,
 } from "lucide-react";
 
 import { FormError } from "@/components/common/async-state";
+import { AttachmentsCard, FileDropZone, fileIcon, formatFileSize } from "@/components/documents/attachments";
 import { ConfirmButton } from "@/components/common/confirm-dialog";
 import { PermissionGate } from "@/components/common/permission-gate";
 import { PrintHeader } from "@/components/common/print-header";
@@ -47,12 +48,16 @@ import {
   useUpdateDraftGoodsReceipt,
 } from "@/hooks/use-receiving";
 import { useSession } from "@/hooks/use-session";
+import { documentsApi } from "@/lib/api";
 import { GRN_ISSUE_LABELS } from "@/lib/api/receiving.api";
 import { PREVIEW_NUMBER_NOTE } from "@/lib/domain/numbering";
 import { useNextDocumentNumber } from "@/hooks/use-admin";
 import { useUnsavedChangesGuard } from "@/lib/unsaved-changes";
 import { cn } from "@/lib/utils";
-import type { GrnIssueType, ReceiptLine } from "@/types";
+import type { GrnIssueType, PurchaseOrderStatus, ReceiptLine } from "@/types";
+
+/** POs goods can be received against — mirrors the server's BR-GRN-12 list. */
+const RECEIVABLE_PO_STATUSES: PurchaseOrderStatus[] = ["approved", "sent", "acknowledged", "partially_received"];
 
 /**
  * Goods receipt entry.
@@ -161,7 +166,10 @@ export function GrnForm({
   const openOrders = React.useMemo(
     () =>
       (ordersQuery.data?.items ?? []).filter(
-        (po) => !["draft", "cancelled", "closed"].includes(po.status) && po.receivedPct < 100,
+        // The server's own list (`_PO_LINKABLE_STATUSES`, BR-GRN-12). A
+        // "not draft/cancelled/closed" check let a PO still awaiting
+        // approval through, and saving then failed.
+        (po) => RECEIVABLE_PO_STATUSES.includes(po.status) && po.receivedPct < 100,
       ),
     [ordersQuery.data],
   );
@@ -232,9 +240,38 @@ export function GrnForm({
     setSeeded(true);
   }, [isEdit, seeded, draft]);
 
-  const create = useCreateGoodsReceipt((grn) => {
+  // A new receipt does not exist until it is saved, so the files chosen
+  // for it wait here and are attached once it has an id.
+  const [pendingFiles, setPendingFiles] = React.useState<File[]>([]);
+  const [fileProblem, setFileProblem] = React.useState<string | null>(null);
+  const [attaching, setAttaching] = React.useState(false);
+
+  function addFiles(chosen: File[]) {
+    const problems = chosen.map(documentsApi.attachmentProblem).filter(Boolean);
+    setFileProblem(problems.length ? problems.join(" ") : null);
+    const ok = chosen.filter((f) => !documentsApi.attachmentProblem(f));
+    setPendingFiles((prev) => [
+      ...prev,
+      ...ok.filter((f) => !prev.some((p) => p.name === f.name && p.size === f.size)),
+    ]);
+    if (ok.length) setDirty(true);
+  }
+
+  const create = useCreateGoodsReceipt(async (grn) => {
     setDirty(false);
-    router.push(`/goods-receipt/${grn.id}`);
+    let failed = 0;
+    if (pendingFiles.length) {
+      setAttaching(true);
+      for (const file of pendingFiles) {
+        try {
+          await documentsApi.uploadAttachment({ linkedType: "goods_receipt", linkedId: grn.id, file });
+        } catch {
+          failed += 1;
+        }
+      }
+    }
+    // The receipt is saved either way; the detail page says which files to add again.
+    router.push(`/goods-receipt/${grn.id}${failed ? `?attach_failed=${failed}` : ""}`);
   });
   const saveEdit = useUpdateDraftGoodsReceipt(
     goodsReceiptId ?? "",
@@ -765,24 +802,55 @@ export function GrnForm({
         </SectionCard>
       )}
 
-      <SectionCard
-        title="Documents"
-        description="Delivery challan, invoice or photos"
-        className="print:hidden"
-      >
-        <div className="p-4">
-          <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/40 px-6 py-7 text-center transition-colors hover:border-primary/45 hover:bg-primary-subtle/35">
-            <input type="file" multiple className="hidden" />
-            <FileUp className="size-5 text-muted-foreground" strokeWidth={1.9} />
-            <span className="mt-2 text-[13.5px] font-medium text-foreground">
-              Upload delivery challan, invoice or any document
-            </span>
-            <span className="mt-0.5 text-caption text-muted-foreground">
-              Drag &amp; drop files here or click to browse (PDF, Excel, Images)
-            </span>
-          </label>
-        </div>
-      </SectionCard>
+      {isEdit && goodsReceiptId ? (
+        <AttachmentsCard
+          linkedType="goods_receipt"
+          linkedId={goodsReceiptId}
+          editPermissions={["grn.create", "grn.update"]}
+          description="Delivery challan, invoice or photos"
+          dropTitle="Upload delivery challan, invoice or any document"
+        />
+      ) : (
+        <SectionCard
+          title="Documents"
+          description="Delivery challan, invoice or photos — attached when you save"
+          className="print:hidden"
+        >
+          <div className="space-y-3 p-4">
+            {pendingFiles.length > 0 && (
+              <ul className="divide-y divide-border rounded-lg border border-border" data-testid="pending-attachments">
+                {pendingFiles.map((file) => {
+                  const Icon = fileIcon((file.name.split(".").pop() ?? "").toLowerCase());
+                  return (
+                    <li key={`${file.name}-${file.size}`} className="flex items-center gap-3 px-3 py-2.5">
+                      <Icon className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate text-[13.5px] text-foreground">{file.name}</span>
+                      <span className="text-caption text-muted-foreground">{formatFileSize(file.size)}</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-7"
+                        aria-label={`Remove ${file.name}`}
+                        onClick={() => setPendingFiles((prev) => prev.filter((p) => p !== file))}
+                      >
+                        <X className="size-3.5" />
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <FileDropZone
+              onFiles={addFiles}
+              busy={attaching}
+              disabled={attaching}
+              title="Upload delivery challan, invoice or any document"
+              hint="Drag & drop files here or click to browse (PDF, Word, Excel, images)"
+            />
+            <FormError message={fileProblem} />
+          </div>
+        </SectionCard>
+      )}
 
       <Alert variant="info">
         <Info />

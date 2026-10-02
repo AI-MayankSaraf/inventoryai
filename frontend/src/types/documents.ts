@@ -39,7 +39,7 @@ export type BusinessDocumentType =
   | "other"
   | "unrecognised";
 
-export type FileExtension = "xlsx" | "xls" | "csv" | "pdf" | "docx" | "jpg" | "jpeg" | "png";
+export type FileExtension = "xlsx" | "xls" | "csv" | "pdf" | "docx" | "jpg" | "jpeg" | "png" | "webp";
 
 export interface StoredDocument {
   id: Id;

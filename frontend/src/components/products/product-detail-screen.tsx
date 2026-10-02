@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ArrowLeft, ImageIcon, Package, PackagePlus, Truck, Warehouse } from "lucide-react";
+import { ArrowLeft, Package, PackagePlus, Truck, Warehouse } from "lucide-react";
 
 import { AsyncBoundary, LoadingCard } from "@/components/common/async-state";
 import { AuditTrail } from "@/components/common/audit-trail";
@@ -24,6 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { GodownLevelsCard } from "@/components/products/godown-levels-card";
+import { ProductFilesCard } from "@/components/products/product-files-card";
 import { UomConversionsCard } from "@/components/products/uom-conversions-card";
 import { useProduct } from "@/hooks/use-catalog";
 import { useStockByGodown, useVariantLedger } from "@/hooks/use-inventory";
@@ -354,19 +355,7 @@ export function ProductDetailScreen({ variantId }: { variantId: Id }) {
                     )}
                   </SectionCard>
 
-                  <SectionCard title="Images & Documents">
-                    <EmptyState
-                      icon={ImageIcon}
-                      title="No files yet"
-                      description="Product photos, spec sheets and certificates will appear here."
-                      action={
-                        <Button variant="outline" size="sm">
-                          Upload file
-                        </Button>
-                      }
-                      className="py-8"
-                    />
-                  </SectionCard>
+                  <ProductFilesCard variantId={detail.variant.id} />
                 </div>
               </div>
             </div>

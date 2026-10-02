@@ -59,6 +59,7 @@ import {
   httpPatch,
   httpPost,
   httpUpload,
+  isApiError,
   notFound,
   reject,
   validationFailed,
@@ -364,22 +365,15 @@ export async function createRfq(input: RfqInput, sendNow = false): Promise<Rfq> 
       expected_price: l.expectedPrice,
       remarks: l.remarks,
     })),
+    // Recorded as "pending" on the draft, so a draft keeps its suppliers
+    // and can be sent later from the RFQ screen.
+    supplier_ids: input.supplierIds,
   });
 
   if (sendNow) {
-    // The backend only attaches suppliers to an RFQ at send time — there is
-    // no separate "create with these suppliers pre-attached" field on
-    // `RfqCreate`.
-    const sent = await httpPost<RfqOut>(`/procurement/rfqs/${created.id}/send`, {
-      supplier_ids: input.supplierIds,
-    });
+    const sent = await httpPost<RfqOut>(`/procurement/rfqs/${created.id}/send`, {});
     return toRfq(sent);
   }
-  // Judgment call / known gap: when saving as a draft, any suppliers the
-  // buyer pre-selected have nowhere to persist — the backend has no
-  // "attach suppliers to a draft" endpoint, only "send to these suppliers
-  // now". `input.supplierIds` is therefore simply not recorded until the
-  // RFQ is actually sent. See `sendRfq` below for the consequence.
   return toRfq(created);
 }
 
@@ -565,29 +559,20 @@ export async function importRfq(file: File, input: RfqImportInput): Promise<Rfq>
   return toRfq(created);
 }
 
+/** Sends to the suppliers recorded on the draft. */
 export async function sendRfq(rfqId: Id): Promise<Rfq> {
-  // Flagged judgment call: this function's signature (inherited from the
-  // mock version) takes no supplier list, because the mock kept a
-  // "pending" supplier roster attached to every RFQ from the moment it was
-  // created. The real backend has no such roster — suppliers are attached
-  // only inside this same `/send` call. So a genuine draft created via
-  // `createRfq(..., false)` has zero suppliers recorded server-side, and
-  // there is nothing here to send to. The best this function can do
-  // without a signature change is re-send to whichever suppliers the RFQ
-  // *already* has recorded (e.g. retrying a previous send); if it has
-  // none, it fails with a clear, catchable error rather than silently
-  // sending to nobody.
-  const current = await httpGet<RfqOut>(`/procurement/rfqs/${rfqId}`);
-  if (!current.suppliers.length) {
-    reject(
-      "This RFQ has no suppliers recorded yet. Choose suppliers and send from the RFQ form — sending a draft later isn't supported yet.",
-      "BR-RFQ-02",
-    );
-  }
-  const sent = await httpPost<RfqOut>(`/procurement/rfqs/${rfqId}/send`, {
-    supplier_ids: current.suppliers.map((s) => s.supplier_id),
-  });
-  return toRfq(sent);
+  return toRfq(await httpPost<RfqOut>(`/procurement/rfqs/${rfqId}/send`, {}));
+}
+
+/** On a draft the suppliers wait for the send; on a sent RFQ they are sent to now. */
+export async function addRfqSuppliers(rfqId: Id, supplierIds: Id[]): Promise<Rfq> {
+  if (!supplierIds.length) validationFailed([{ field: "suppliers", message: "Choose a supplier." }]);
+  return toRfq(await httpPost<RfqOut>(`/procurement/rfqs/${rfqId}/suppliers`, { supplier_ids: supplierIds }));
+}
+
+/** Draft only — once sent, the supplier already has the RFQ. */
+export async function removeRfqSupplier(rfqId: Id, supplierId: Id): Promise<Rfq> {
+  return toRfq(await httpDelete<RfqOut>(`/procurement/rfqs/${rfqId}/suppliers/${supplierId}`));
 }
 
 export async function cancelRfq(rfqId: Id, reason: string): Promise<Rfq> {
@@ -977,6 +962,7 @@ interface ComparisonOut {
   strategy: string;
   status: string;
   single_supplier_best_total: number | null;
+  single_supplier_best_supplier_id: string | null;
   split_total: number | null;
   projected_savings: number | null;
   notes: string | null;
@@ -1113,17 +1099,13 @@ async function assembleComparisonView(c: ComparisonOut): Promise<ComparisonView>
     };
   });
 
-  // Backend gives only the single-supplier-baseline *total* — match it back
-  // to the (necessarily unique among full-coverage suppliers) supplier it
-  // belongs to, so the screen can name them.
-  const bestSupplier =
-    c.single_supplier_best_total != null
-      ? suppliers.find((s) => s.missingLines === 0 && Math.abs(s.total - c.single_supplier_best_total!) < 0.005)
-      : undefined;
+  // All three figures are worked out by the server from the grid it
+  // returns, and it names the best single supplier itself — no matching
+  // totals back to a supplier here.
+  const bestSupplier = suppliers.find((s) => s.supplierId === c.single_supplier_best_supplier_id);
   const splitTotal = c.split_total ?? 0;
   const singleBestTotal = c.single_supplier_best_total ?? 0;
-  const projectedSavings =
-    c.single_supplier_best_total != null ? round2(singleBestTotal - splitTotal) : c.projected_savings ?? 0;
+  const projectedSavings = round2(c.projected_savings ?? 0);
 
   const comparison: QuotationComparison = {
     id: c.id,
@@ -1168,10 +1150,22 @@ export async function getComparison(comparisonId: Id): Promise<ComparisonView> {
   return assembleComparisonView(c);
 }
 
-/** Get (or build) the comparison for an RFQ from the quotes received. */
-export async function getComparisonForRfq(rfqId: Id): Promise<ComparisonView> {
+/**
+ * Get (or build) the comparison for an RFQ from the quotes received.
+ * `null` when no quotation is approved yet — an ordinary step in the flow
+ * (quotes are in, nobody has approved one), not a failure to show as one.
+ */
+export async function getComparisonForRfq(rfqId: Id): Promise<ComparisonView | null> {
   const existing = await httpGet<ComparisonOut[]>("/procurement/comparisons", { rfq_id: rfqId, limit: 1 });
-  const c = existing[0] ?? (await httpPost<ComparisonOut>("/procurement/comparisons", { rfq_id: rfqId }));
+  let c = existing[0];
+  if (!c) {
+    try {
+      c = await httpPost<ComparisonOut>("/procurement/comparisons", { rfq_id: rfqId });
+    } catch (error) {
+      if (isApiError(error) && error.code === "NO_ITEMS") return null;
+      throw error;
+    }
+  }
   return assembleComparisonView(c);
 }
 

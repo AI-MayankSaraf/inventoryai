@@ -86,6 +86,24 @@ export function useAddUomConversion(productVariantId: Id, onSuccess?: () => void
   return useApiMutation(action, { onSuccess: () => onSuccess?.() });
 }
 
+export function useProductFiles(productVariantId: Id) {
+  return useApiQuery(["product-files", productVariantId], () =>
+    catalogApi.listProductFiles(productVariantId),
+  );
+}
+
+export function useUploadProductFile(productVariantId: Id, onSuccess?: () => void) {
+  const action = useCallback(
+    (file: File) => catalogApi.uploadProductFile(productVariantId, file),
+    [productVariantId],
+  );
+  return useApiMutation(action, { onSuccess: () => onSuccess?.() });
+}
+
+export function useRemoveProductFile(onSuccess?: () => void) {
+  return useApiMutation(catalogApi.removeProductFile, { onSuccess: () => onSuccess?.() });
+}
+
 export function useDeleteUomConversion(onSuccess?: () => void) {
   return useApiMutation(catalogApi.deleteUomConversion, { onSuccess: () => onSuccess?.() });
 }

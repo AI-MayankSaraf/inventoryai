@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 const ACCEPTED = [
   { icon: FileSpreadsheet, label: "Excel", ext: ".xlsx, .xls, .csv" },
   { icon: FileText, label: "PDF & Word", ext: ".pdf, .docx" },
-  { icon: ImageIcon, label: "Photos", ext: ".jpg, .png" },
+  { icon: ImageIcon, label: "Photos", ext: ".jpg, .png, .webp" },
 ];
 
 export function DocumentDropzone({
@@ -48,7 +48,7 @@ export function DocumentDropzone({
         ref={inputRef}
         type="file"
         multiple
-        accept=".xlsx,.xls,.csv,.pdf,.docx,.jpg,.jpeg,.png"
+        accept=".xlsx,.xls,.csv,.pdf,.docx,.jpg,.jpeg,.png,.webp"
         className="hidden"
         onChange={(e) => onFiles?.(Array.from(e.target.files ?? []))}
       />

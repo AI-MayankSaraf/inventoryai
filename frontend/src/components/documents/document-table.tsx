@@ -43,6 +43,7 @@ const FILE_ICONS: Record<FileExtension, LucideIcon> = {
   jpg: ImageIcon,
   jpeg: ImageIcon,
   png: ImageIcon,
+  webp: ImageIcon,
 };
 
 const STATE: Record<

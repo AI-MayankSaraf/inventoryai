@@ -7,7 +7,8 @@ mapping and product matching can run on a scan as on an Excel file. This
 module rebuilds that grid from where each word sits on the page:
 
 1. Render each page (PDFs via pdfium, no Poppler needed) at 300 dpi.
-2. Ask Tesseract for every word *with its box* (`image_to_data`).
+2. Erase table borders, then ask Tesseract for every word *with its box*
+   (`image_to_data`, sparse-text mode).
 3. Group words into visual rows by their vertical centre.
 4. Split each row into cells wherever the horizontal gap is wider than a
    couple of spaces — that's where one column ends and the next begins.
@@ -73,7 +74,11 @@ def _config() -> str:
         # pytesseract passes quote marks through literally, and a quoted
         # path is then "not found".
         os.environ["TESSDATA_PREFIX"] = s.ocr_tessdata_dir
-    return "--psm 4 -c preserve_interword_spaces=1"
+    # Sparse text: every word with its box, no reading order assumed. Rows
+    # and columns are rebuilt here from the boxes, so Tesseract's own layout
+    # analysis only gets in the way — `--psm 4` (one column) merged "Sr No"
+    # into "Item Description" and read almost nothing from a boxed template.
+    return "--psm 11 -c preserve_interword_spaces=1"
 
 
 def _images(blob: bytes, mime_type: str):
@@ -99,13 +104,45 @@ def _images(blob: bytes, mime_type: str):
     yield image
 
 
+def _erase_rules(gray):
+    """Paint table borders white.
+
+    Tesseract reads a bordered table well while the rules are a pixel or
+    two wide and falls apart once they are three or more — a boxed
+    quotation scanned at 300 dpi went from 30 of 30 cells to 2. Rules are
+    found as long unbroken runs of near-black pixels: far longer than any
+    letter's stroke, so the text itself survives. Pillow only, scanning
+    each row's bytes, so it costs milliseconds, not a NumPy dependency.
+    """
+    import re
+
+    from PIL import Image, ImageDraw
+
+    dark = gray.point(lambda p: 0 if p < 110 else 255)
+    cleaned = gray.copy()
+    draw = ImageDraw.Draw(cleaned)
+    for transposed in (False, True):
+        source = dark.transpose(Image.Transpose.TRANSPOSE) if transposed else dark
+        width, height = source.size
+        # Horizontal rules span at least a column; vertical ones at least a
+        # couple of table rows. Both are far past a letter's height.
+        run = re.compile(rb"\x00{%d,}" % max(60, (width // 12) if not transposed else (width // 30)))
+        data = source.tobytes()
+        for y in range(height):
+            for match in run.finditer(data, y * width, (y + 1) * width):
+                x0, x1 = match.start() - y * width, match.end() - y * width - 1
+                draw.line((y, x0, y, x1) if transposed else (x0, y, x1, y), fill=255)
+    return cleaned
+
+
 def _page(image) -> OcrPage:
     from PIL import ImageFilter, ImageOps
 
     pytesseract = _tesseract()
     # Stretch contrast and sharpen: a faint or slightly blurred scan loses
     # digits otherwise (a "5" came back as "(3)" in testing without this).
-    gray = ImageOps.autocontrast(image.convert("L")).filter(ImageFilter.SHARPEN)
+    gray = ImageOps.autocontrast(image.convert("L"))
+    gray = _erase_rules(gray).filter(ImageFilter.SHARPEN)
     data = pytesseract.image_to_data(
         gray, lang=get_settings().ocr_languages, config=_config(), output_type=pytesseract.Output.DICT
     )
@@ -174,7 +211,7 @@ def _align(rows: list[list[tuple[str, float, float]]], header_index: int) -> lis
 
 def read(blob: bytes, mime_type: str, hints: Optional[set[str]] = None) -> tuple[str, list[tuple[str, list[list[str]]]]]:
     """(full text, [(sheet name, grid)]) for every page that has a table."""
-    from app.modules.ai.parsing import _find_header_row
+    from app.modules.ai.parsing import _find_header_row, _hinted_header_row
 
     ok, why = available()
     if not ok:
@@ -187,7 +224,16 @@ def read(blob: bytes, mime_type: str, hints: Optional[set[str]] = None) -> tuple
         naive = [[t for t, _a, _b in r] for r in page.rows]
         if sum(1 for r in naive if len(r) >= 3) < 2:
             continue  # no table on this page
-        header_index = _find_header_row(naive, hints)
+        if hints:
+            # A spreadsheet's first wordy row is a fair guess at its heading;
+            # on a scan it is as likely to be speckle from a patterned
+            # border read as "ee | ee | ee". Only a row that names real
+            # columns counts — otherwise the page has no table we trust.
+            header_index = _hinted_header_row(naive, hints, limit=len(naive))
+            if header_index is None:
+                continue
+        else:
+            header_index = _find_header_row(naive, hints)
         if len(page.rows[header_index]) < 2:
             continue
         grids.append((f"page {number}", _align(page.rows, header_index)))
