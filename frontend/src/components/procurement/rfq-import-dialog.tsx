@@ -40,9 +40,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useDebounced } from "@/hooks/use-api";
 import { useUoms } from "@/hooks/use-catalog";
 import { useImportRfq, useRfqImportPreview } from "@/hooks/use-procurement";
-import type { procurementApi } from "@/lib/api";
+import { procurementApi } from "@/lib/api";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -149,6 +150,22 @@ export function ImportRfqButton() {
 
   const [sourceName, setSourceName] = React.useState("");
   const [referenceNumber, setReferenceNumber] = React.useState("");
+  // Checked against this company's RFQs as it is typed, so a duplicate is
+  // caught before Import rather than after.
+  const debouncedReference = useDebounced(referenceNumber.trim(), 400);
+  const [duplicateOf, setDuplicateOf] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    let live = true;
+    setDuplicateOf(null);
+    if (!debouncedReference) return;
+    procurementApi
+      .checkRfqReference(debouncedReference)
+      .then((r) => live && setDuplicateOf(r.exists ? r.rfqNumber : null))
+      .catch(() => undefined); // the import itself checks again
+    return () => {
+      live = false;
+    };
+  }, [debouncedReference]);
   const [subject, setSubject] = React.useState("");
 
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -322,10 +339,21 @@ export function ImportRfqButton() {
               onReferenceNumber={setReferenceNumber}
               onSubject={setSubject}
               sourceError={doImport.fieldErrors.externalSourceName}
+              referenceError={
+                duplicateOf
+                  ? `Already imported as ${duplicateOf}`
+                  : doImport.fieldErrors.externalReferenceNumber
+              }
             />
           )}
 
-          <FormError message={doImport.error && !doImport.fieldErrors.externalSourceName ? doImport.error : null} />
+          <FormError
+            message={
+              doImport.error && !doImport.fieldErrors.externalSourceName && !doImport.fieldErrors.externalReferenceNumber
+                ? doImport.error
+                : null
+            }
+          />
         </DialogBody>
 
         <DialogFooter className="sm:items-center">
@@ -352,7 +380,14 @@ export function ImportRfqButton() {
           {step === 2 && (
             <Button
               onClick={runImport}
-              disabled={blocking || preview.isPending || doImport.isPending || !sourceName.trim()}
+              disabled={
+                blocking ||
+                preview.isPending ||
+                doImport.isPending ||
+                !sourceName.trim() ||
+                !referenceNumber.trim() ||
+                !!duplicateOf
+              }
               data-testid="import-rfq-confirm"
             >
               {doImport.isPending ? <Loader2 className="animate-spin" /> : <Check />}
@@ -905,6 +940,7 @@ function ReviewStep({
   onReferenceNumber,
   onSubject,
   sourceError,
+  referenceError,
 }: {
   data: Preview;
   sourceName: string;
@@ -914,6 +950,7 @@ function ReviewStep({
   onReferenceNumber: (v: string) => void;
   onSubject: (v: string) => void;
   sourceError?: string;
+  referenceError?: string;
 }) {
   const estimated = data.rows.reduce((sum, r) => sum + r.quantity * r.expectedPrice, 0);
   return (
@@ -934,13 +971,18 @@ function ReviewStep({
           {sourceError && <p className="text-caption text-destructive">{sourceError}</p>}
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="import-ref">Their RFQ / enquiry no.</Label>
+          <Label htmlFor="import-ref">
+            Their RFQ / enquiry no. <span className="text-destructive">*</span>
+          </Label>
           <Input
             id="import-ref"
-            placeholder="If the file has one"
+            placeholder="e.g. GEM/2026/B/1234"
             value={referenceNumber}
             onChange={(e) => onReferenceNumber(e.target.value)}
+            aria-invalid={!!referenceError}
+            data-testid="import-rfq-reference"
           />
+          {referenceError && <p className="text-caption text-destructive">{referenceError}</p>}
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="import-subject">Subject</Label>

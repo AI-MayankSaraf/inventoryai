@@ -545,10 +545,26 @@ export interface RfqImportInput extends RfqImportOptions {
  * catalogue SKU at import time — the result is a normal draft RFQ, editable
  * like any other, so linking lines to SKUs is a follow-up edit.
  */
+/** Whether this enquiry number was already imported by this company. */
+export async function checkRfqReference(
+  reference: string,
+): Promise<{ exists: boolean; rfqId: Id | null; rfqNumber: string | null }> {
+  const out = await httpGet<{ exists: boolean; rfq_id: string | null; rfq_number: string | null }>(
+    "/procurement/rfqs/reference-check",
+    { reference },
+  );
+  return { exists: out.exists, rfqId: out.rfq_id, rfqNumber: out.rfq_number };
+}
+
 export async function importRfq(file: File, input: RfqImportInput): Promise<Rfq> {
+  const errors: { field: string; message: string }[] = [];
   if (!input.externalSourceName.trim()) {
-    validationFailed([{ field: "externalSourceName", message: "Say where this RFQ came from." }]);
+    errors.push({ field: "externalSourceName", message: "Say where this RFQ came from." });
   }
+  if (!input.externalReferenceNumber?.trim()) {
+    errors.push({ field: "externalReferenceNumber", message: "Enter the RFQ / enquiry number from the file." });
+  }
+  if (errors.length) validationFailed(errors);
   const created = await httpUpload<RfqOut>("/procurement/rfqs/import", file, {
     external_source_name: input.externalSourceName.trim(),
     external_reference_number: input.externalReferenceNumber?.trim(),

@@ -135,6 +135,9 @@ async def record(
         UUID(claims.impersonated_by) if claims and getattr(claims, "impersonated_by", None) else None
     )
 
+    # The actor's name is stored, not just their id: the audit trail must
+    # still say who did it after a user is renamed or removed. It used to
+    # be left empty unless a caller passed it, so every entry read "owner".
     before_data = _redact(before)
     after_data = _redact(after)
 
@@ -145,7 +148,7 @@ async def record(
             " actor_user_id, actor_name, actor_role, impersonated_by, before_data, after_data, changed_fields, "
             " ip_address, user_agent, source) "
             "VALUES (:company_id, :entity_type, :entity_id, :entity_label, :action, :description, "
-            " :actor_user_id, :actor_name, :actor_role, :impersonated_by, "
+            " :actor_user_id, COALESCE(:actor_name, (SELECT full_name FROM users WHERE id = :actor_user_id)), :actor_role, :impersonated_by, "
             " CAST(:before_data AS jsonb), CAST(:after_data AS jsonb), CAST(:changed_fields AS jsonb), "
             " CAST(:ip_address AS inet), :user_agent, 'api')"
         ),

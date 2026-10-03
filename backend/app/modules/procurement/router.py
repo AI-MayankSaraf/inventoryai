@@ -51,6 +51,27 @@ async def create_rfq(
     return await rfq_service.create_rfq(session, claims=claims, body=body, request=request)
 
 
+@router.get("/rfqs/reference-check", response_model=schemas.RfqReferenceCheckOut)
+async def rfq_reference_check(
+    reference: str = Query(default="", max_length=200),
+    claims: AccessTokenClaims = Depends(require_permission("rfq.import")),
+    session: AsyncSession = Depends(get_tenant_session),
+):
+    """Has this enquiry number already been imported? Lets the import
+    screen say so while the number is typed, instead of after Import.
+    A blank number has not been imported."""
+    existing = (
+        await rfq_service.find_by_reference(session, company_id=claims.company_id, reference=reference)
+        if reference.strip()
+        else None
+    )
+    return {
+        "exists": existing is not None,
+        "rfq_id": existing["id"] if existing else None,
+        "rfq_number": existing["rfq_number"] if existing else None,
+    }
+
+
 @router.get("/rfqs/{rfq_id}", response_model=schemas.RfqOut)
 async def get_rfq(
     rfq_id: UUID,

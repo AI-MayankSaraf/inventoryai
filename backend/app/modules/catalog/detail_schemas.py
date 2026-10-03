@@ -164,6 +164,41 @@ class ProductFileOut(BaseModel):
     url_expires_at: datetime
 
 
+# ------------------------------------------------------- product import
+
+class ProductImportColumnOut(BaseModel):
+    field: str
+    label: str
+    required: bool
+    #: The file's heading this field is read from; None when not found.
+    header: Optional[str] = None
+
+
+class ProductImportRowErrorOut(BaseModel):
+    row: int
+    sku: str
+    errors: list[str]
+
+
+class ProductImportPreviewOut(BaseModel):
+    header_row: Optional[int]
+    columns: list[ProductImportColumnOut]
+    row_count: int
+    valid_count: int
+    error_count: int
+    file_errors: list[str]
+    row_errors: list[ProductImportRowErrorOut]
+    sample: list[dict]
+    new_brands: list[str]
+    new_categories: list[str]
+
+
+class ProductImportResultOut(BaseModel):
+    imported: int
+    new_brands: list[str]
+    new_categories: list[str]
+
+
 # --------------------------------------------- per-godown reorder levels
 
 class GodownPolicyIn(BaseModel):

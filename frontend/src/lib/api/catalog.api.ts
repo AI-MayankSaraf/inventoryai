@@ -34,7 +34,16 @@ import type {
   StockPolicy,
   Uom,
 } from "@/types";
-import { httpDelete, httpGet, httpPatch, httpPost, httpPut, httpUpload, validationFailed } from "./client";
+import {
+  httpDelete,
+  httpDownload,
+  httpGet,
+  httpPatch,
+  httpPost,
+  httpPut,
+  httpUpload,
+  validationFailed,
+} from "./client";
 import { toLinkedProduct, type SupplierProductOut } from "./suppliers.api";
 
 /* --------------------------------------------------------- Backend shapes */
@@ -774,3 +783,71 @@ export async function getVariantStock(productVariantId: Id, godownId?: Id): Prom
   return relevant.reduce((sum, r) => sum + r.quantity, 0);
 }
 
+
+/* ---------------------------------------------------------- Product import */
+
+export interface ProductImportPreview {
+  headerRow: number | null;
+  columns: { field: string; label: string; required: boolean; header: string | null }[];
+  rowCount: number;
+  validCount: number;
+  errorCount: number;
+  fileErrors: string[];
+  rowErrors: { row: number; sku: string; errors: string[] }[];
+  sample: { row: number; sku: string; name: string; unit: string; brand: string | null; category: string | null; gst: number; sale_price: number }[];
+  newBrands: string[];
+  newCategories: string[];
+}
+
+interface ProductImportPreviewOut {
+  header_row: number | null;
+  columns: ProductImportPreview["columns"];
+  row_count: number;
+  valid_count: number;
+  error_count: number;
+  file_errors: string[];
+  row_errors: ProductImportPreview["rowErrors"];
+  sample: ProductImportPreview["sample"];
+  new_brands: string[];
+  new_categories: string[];
+}
+
+export const PRODUCT_IMPORT_ACCEPT = ".xlsx,.xls,.csv";
+
+function checkImportFile(file: File) {
+  if (!/\.(xlsx|xls|csv)$/i.test(file.name)) {
+    validationFailed([{ field: "file", message: "Choose an Excel (.xlsx, .xls) or .csv file." }]);
+  }
+}
+
+/** Reads and checks the file on the server; writes nothing. */
+export async function previewProductImport(file: File): Promise<ProductImportPreview> {
+  checkImportFile(file);
+  const o = await httpUpload<ProductImportPreviewOut>("/catalog/product-import/preview", file);
+  return {
+    headerRow: o.header_row,
+    columns: o.columns,
+    rowCount: o.row_count,
+    validCount: o.valid_count,
+    errorCount: o.error_count,
+    fileErrors: o.file_errors,
+    rowErrors: o.row_errors,
+    sample: o.sample,
+    newBrands: o.new_brands,
+    newCategories: o.new_categories,
+  };
+}
+
+/** Imports every row, or none if any row has a problem. */
+export async function importProducts(file: File): Promise<{ imported: number; newBrands: string[]; newCategories: string[] }> {
+  checkImportFile(file);
+  const o = await httpUpload<{ imported: number; new_brands: string[]; new_categories: string[] }>(
+    "/catalog/product-import",
+    file,
+  );
+  return { imported: o.imported, newBrands: o.new_brands, newCategories: o.new_categories };
+}
+
+export function downloadProductImportTemplate(): Promise<void> {
+  return httpDownload("/catalog/product-import/template", "products-import-template.csv");
+}

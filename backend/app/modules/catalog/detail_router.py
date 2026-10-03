@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_tenant_session, require_permission
 from app.core.security import AccessTokenClaims
 from app.modules.catalog import detail_service as svc
-from app.modules.catalog import product_files
+from app.modules.catalog import product_files, product_import
 from app.modules.catalog import detail_schemas as s
 
 router = APIRouter(prefix="/catalog", tags=["catalog-detail"])
@@ -270,4 +270,57 @@ async def replace_policies(
 ):
     return await svc.replace_policies(
         session, claims=claims, variant_id=variant_id, policies=[p.model_dump() for p in body.policies], request=request
+    )
+
+
+# ------------------------------------------------------- product import
+# Under /product-import, not /products/import: the generic
+# GET /products/{row_id} route would read "import" as a product id.
+
+_MAX_PRODUCT_IMPORT_BYTES = 10 * 1024 * 1024
+
+
+async def _read_product_file(file: UploadFile) -> bytes:
+    content = await file.read()
+    if len(content) > _MAX_PRODUCT_IMPORT_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="The file is over 10 MB")
+    return content
+
+
+@router.get("/product-import/template")
+async def product_import_template(
+    claims: AccessTokenClaims = Depends(require_permission("product.create")),
+):
+    """A CSV with every heading the importer reads and one example row."""
+    return Response(
+        content="﻿" + product_import.template_csv(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="products-import-template.csv"'},
+    )
+
+
+@router.post("/product-import/preview", response_model=s.ProductImportPreviewOut)
+async def product_import_preview(
+    file: UploadFile = File(...),
+    claims: AccessTokenClaims = Depends(require_permission("product.create")),
+    session: AsyncSession = Depends(get_tenant_session),
+):
+    """Reads and checks the file; writes nothing."""
+    result = await product_import.check(
+        session, claims=claims, filename=file.filename or "upload", content=await _read_product_file(file)
+    )
+    return result.as_dict()
+
+
+@router.post("/product-import", response_model=s.ProductImportResultOut, status_code=status.HTTP_201_CREATED)
+async def product_import_run(
+    request: Request,
+    file: UploadFile = File(...),
+    claims: AccessTokenClaims = Depends(require_permission("product.create")),
+    session: AsyncSession = Depends(get_tenant_session),
+):
+    """The same checks as the preview; imports every row or none."""
+    return await product_import.import_file(
+        session, claims=claims, filename=file.filename or "upload",
+        content=await _read_product_file(file), request=request,
     )

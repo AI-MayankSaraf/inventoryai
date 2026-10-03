@@ -324,3 +324,35 @@ export async function httpUpload<T>(
   }
   return payload as T;
 }
+
+/**
+ * Download a file the API serves behind sign-in (a template, an export).
+ * A plain link cannot carry the bearer token, so it is fetched here and
+ * handed to the browser as a blob.
+ */
+export async function httpDownload(path: string, filename: string): Promise<void> {
+  const tokens = getStoredTokens();
+  let res: Response;
+  try {
+    res = await fetch(buildUrl(path), {
+      headers: tokens ? { Authorization: `Bearer ${tokens.accessToken}` } : undefined,
+    });
+  } catch {
+    throw new ApiError("Could not reach the server. Check that it's running and try again.", {
+      code: "NETWORK_ERROR",
+      status: 0,
+    });
+  }
+  if (!res.ok) {
+    throw new ApiError(`Download failed (${res.status})`, { code: "REQUEST_FAILED", status: res.status });
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

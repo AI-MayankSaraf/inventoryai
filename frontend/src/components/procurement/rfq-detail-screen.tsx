@@ -38,6 +38,7 @@ import {
 import { useApiMutation } from "@/hooks/use-api";
 import { useAddRfqSuppliers, useRemoveRfqSupplier, useRfq, useSendRfq } from "@/hooks/use-procurement";
 import { useSuppliers } from "@/hooks/use-suppliers";
+import { SupplierFormDialog } from "@/components/suppliers/supplier-form-dialog";
 import { procurementApi } from "@/lib/api";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 import type { Id } from "@/types";
@@ -159,6 +160,26 @@ function AddSupplierDialog({
                 ))}
               </SelectContent>
             </Select>
+            <PermissionGate permission="supplier.create">
+              <p className="flex flex-wrap items-center gap-1 text-caption text-muted-foreground">
+                Not in the list?
+                <SupplierFormDialog
+                  trigger={
+                    <Button variant="link" size="sm" className="h-auto p-0" data-testid="rfq-new-supplier">
+                      <Plus className="size-3.5" />
+                      Add new supplier
+                    </Button>
+                  }
+                  onSaved={(created) => {
+                    suppliersState.refresh();
+                    // A draft just gains it; on a sent RFQ adding means
+                    // emailing it, so that waits for "Add and send".
+                    if (sent) setSupplierId(created.id);
+                    else void add.run([created.id]);
+                  }}
+                />
+              </p>
+            </PermissionGate>
             <FormError message={add.error} fieldErrors={add.fieldErrors} />
           </DialogBody>
           <DialogFooter>

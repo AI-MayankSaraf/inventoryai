@@ -109,6 +109,12 @@ class RfqSendRequest(BaseModel):
     supplier_ids: list[UUID] = Field(default_factory=list)
 
 
+class RfqReferenceCheckOut(BaseModel):
+    exists: bool
+    rfq_id: Optional[UUID] = None
+    rfq_number: Optional[str] = None
+
+
 class RfqAddSuppliers(BaseModel):
     supplier_ids: list[UUID] = Field(min_length=1)
 

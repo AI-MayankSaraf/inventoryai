@@ -125,7 +125,7 @@ async def dashboard_summary(
             text(
                 """
                 SELECT id, entity_type, entity_id, COALESCE(entity_label, '') AS entity_label,
-                       action, description, COALESCE(actor_name, '') AS actor_name, created_at
+                       action, description, COALESCE(actor_name, (SELECT u.full_name FROM users u WHERE u.id = audit_logs.actor_user_id), '') AS actor_name, created_at
                 FROM audit_logs
                 WHERE company_id = :c AND entity_type = ANY(:types)
                 ORDER BY created_at DESC

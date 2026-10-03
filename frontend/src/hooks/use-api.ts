@@ -107,6 +107,7 @@ export function useApiMutation<TInput, TResult>(
   optionsRef.current = options;
   const actionRef = useRef(action);
   actionRef.current = action;
+  const queryClient = useQueryClient();
 
   const run = useCallback(async (input: TInput) => {
     setIsPending(true);
@@ -115,6 +116,11 @@ export function useApiMutation<TInput, TResult>(
     try {
       const result = await actionRef.current(input);
       setData(result);
+      // Every write the API accepts records an audit event, so any Audit
+      // Trail panel on screen is now behind. Without this the panel kept
+      // its cached copy — adding a supplier to an RFQ left it showing only
+      // "Created" until the page was reloaded.
+      void queryClient.invalidateQueries({ queryKey: ["audit-trail"] });
       optionsRef.current.onSuccess?.(result);
       return result;
     } catch (err) {
@@ -129,7 +135,7 @@ export function useApiMutation<TInput, TResult>(
     } finally {
       setIsPending(false);
     }
-  }, []);
+  }, [queryClient]);
 
   const reset = useCallback(() => {
     setError(null);

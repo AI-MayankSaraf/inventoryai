@@ -46,6 +46,14 @@ export function AuditEventList({
   emptyLabel?: string;
   showEntity?: boolean;
 }) {
+  // "2 minutes ago" is worked out at render; without a tick it stays at
+  // "just now" for as long as the page is open.
+  const [now, setNow] = React.useState(() => new Date());
+  React.useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   if (events.length === 0) {
     return (
       <div className="flex items-center gap-2.5 px-4 py-6 text-[13px] text-muted-foreground">
@@ -97,7 +105,7 @@ export function AuditEventList({
                   </Badge>
                 )}
                 <span className="text-border">·</span>
-                <span title={formatDateTime(event.createdAt)}>{formatRelativeTime(event.createdAt)}</span>
+                <span title={formatDateTime(event.createdAt)}>{formatRelativeTime(event.createdAt, now)}</span>
               </p>
             </div>
           </li>

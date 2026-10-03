@@ -7,6 +7,7 @@ import { CalendarDays, Plus, Save, Send, Trash2, X } from "lucide-react";
 import { ConfirmButton } from "@/components/common/confirm-dialog";
 import { FormError } from "@/components/common/async-state";
 import { PrintHeader } from "@/components/common/print-header";
+import { PermissionGate } from "@/components/common/permission-gate";
 import { SectionCard } from "@/components/common/section-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,7 @@ import { useCompanySettings, useNextDocumentNumber } from "@/hooks/use-admin";
 import { useGodowns, useProducts, useUoms } from "@/hooks/use-catalog";
 import { useCreateRfq } from "@/hooks/use-procurement";
 import { useSuppliers } from "@/hooks/use-suppliers";
+import { SupplierFormDialog } from "@/components/suppliers/supplier-form-dialog";
 import { formatCurrency } from "@/lib/format";
 import { PREVIEW_NUMBER_NOTE } from "@/lib/domain/numbering";
 import type { procurementApi } from "@/lib/api";
@@ -251,23 +253,40 @@ export function RfqForm() {
             <p className="text-[12px] text-destructive">{create.fieldErrors.suppliers}</p>
           )}
 
-          <Select
-            value=""
-            onValueChange={(value) =>
-              setSupplierIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
-            }
-          >
-            <SelectTrigger className="sm:max-w-[340px]">
-              <SelectValue placeholder="Add a supplier..." />
-            </SelectTrigger>
-            <SelectContent>
-              {suppliers.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.name} · {s.city}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Select
+              value=""
+              onValueChange={(value) =>
+                setSupplierIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
+              }
+            >
+              <SelectTrigger className="sm:max-w-[340px]">
+                <SelectValue placeholder="Add a supplier..." />
+              </SelectTrigger>
+              <SelectContent>
+                {suppliers.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name} · {s.city}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <PermissionGate permission="supplier.create">
+              <SupplierFormDialog
+                trigger={
+                  <Button variant="outline" size="sm" data-testid="rfq-form-new-supplier">
+                    <Plus />
+                    Add new supplier
+                  </Button>
+                }
+                onSaved={(created) => {
+                  // Straight onto this RFQ — the reason it was created.
+                  suppliersState.refresh();
+                  setSupplierIds((prev) => (prev.includes(created.id) ? prev : [...prev, created.id]));
+                }}
+              />
+            </PermissionGate>
+          </div>
         </div>
       </SectionCard>
 

@@ -175,8 +175,8 @@ def main() -> int:  # noqa: C901
     print("\n[import]")
     st, b = upload("/procurement/rfqs/import", owner, "bad.csv",
                    b"Description,Quantity,UOM\r\nWidget,-5,Nos\r\nGizmo,2,Nos\r\n",
-                   {"external_source_name": "Flipkart"})
-    check("I01 a file with any bad row is refused whole", st == 422, (st, b))
+                   {"external_source_name": "Flipkart", "external_reference_number": f"BAD-{SFX}"})
+    check("I01 a file with any bad row is refused whole", st == 422 and "row" in b.get("detail", "").lower(), (st, b))
     check("I02 …and nothing was created",
           db("SELECT count(*) AS n FROM rfqs WHERE company_id = :c", {"c": acme_id})[0]["n"] == rfqs_before, "rows")
 
@@ -212,6 +212,24 @@ def main() -> int:  # noqa: C901
         audit = db("SELECT description FROM audit_logs WHERE entity_type = 'rfq' AND entity_id = :id",
                    {"id": rfq["id"]})
         check("I16 the import is audited", any("Imported 3 item" in (a["description"] or "") for a in audit), audit)
+
+        print("\n[enquiry number]")
+        st, b = upload("/procurement/rfqs/import", owner, "flipkart.csv", GOOD_CSV, {"external_source_name": "Flipkart"})
+        check("I17 the RFQ / enquiry number is required", st == 422 and any(
+            e.get("field") == "externalReferenceNumber" for e in b.get("errors", [])), (st, b))
+        st, b = upload("/procurement/rfqs/import", owner, "flipkart.csv", GOOD_CSV,
+                       {"external_source_name": "Flipkart", "external_reference_number": f"  {ext.lower()} "})
+        check("I18 the same number again (any case, spaces) is refused, naming the RFQ",
+              st == 409 and rfq["rfq_number"] in b.get("detail", ""), (st, b))
+        st, chk = call("GET", f"/procurement/rfqs/reference-check?reference={ext.lower()}", owner)
+        check("I19 the as-you-type check finds it", st == 200 and chk["exists"] and chk["rfq_number"] == rfq["rfq_number"], (st, chk))
+        st, other_co = upload("/procurement/rfqs/import", beta, "flipkart.csv", GOOD_CSV,
+                              {"external_source_name": "Flipkart", "external_reference_number": ext})
+        check("I20 another company may use the same number", st == 201, (st, other_co))
+        st, _ = call("POST", f"/procurement/rfqs/{rfq['id']}/cancel", owner, {"reason": "wrong file"})
+        st, again = upload("/procurement/rfqs/import", owner, "flipkart.csv", GOOD_CSV,
+                           {"external_source_name": "Flipkart", "external_reference_number": ext})
+        check("I21 once cancelled, the enquiry can be imported again", st == 201, (st, again))
 
     print("\n[who may import]")
     st, b = upload("/procurement/rfqs/import/preview", admin, "flipkart.csv", GOOD_CSV)

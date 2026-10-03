@@ -79,6 +79,15 @@ class Rfq(UUIDPkMixin, TenantMixin, RowVersionMixin, TimestampMixin, Base):
         tenant_fk("rfqs", "delivery_godown_id", "godowns", ondelete="RESTRICT"),
         UniqueConstraint("company_id", "rfq_number", name="uq_rfq_number"),
         Index("ix_rfqs_status_date", "company_id", "status", "rfq_date"),
+        # An imported enquiry's own number, once per company (migration
+        # a7d41c3e9b58). Cancelled imports may be redone.
+        Index(
+            "uq_rfq_external_reference",
+            "company_id",
+            func.lower(func.btrim(external_reference_number)),
+            unique=True,
+            postgresql_where=text("external_reference_number IS NOT NULL AND status <> 'cancelled'"),
+        ),
         enum_check(
             "status", ["draft", "sent", "partially_quoted", "quoted", "under_review", "closed", "cancelled"]
         ),

@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 _SELECT = """
     SELECT id, entity_type, entity_id, COALESCE(entity_label, '') AS entity_label, action,
-           description, actor_user_id, COALESCE(actor_name, '') AS actor_name, actor_role,
+           description, actor_user_id, COALESCE(actor_name, (SELECT u.full_name FROM users u WHERE u.id = audit_logs.actor_user_id), '') AS actor_name, actor_role,
            impersonated_by, before_data, after_data, changed_fields, created_at
     FROM audit_logs
 """

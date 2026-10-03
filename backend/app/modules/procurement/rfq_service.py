@@ -19,12 +19,14 @@ from uuid import UUID, uuid4
 
 from fastapi import Request, status
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import clock
 from app.core import audit
 from app.core.deps import assert_godown_in_scope
 from app.core.errors import (
+    CODE_DUPLICATE,
     CODE_INVALID_STATE_TRANSITION,
     CODE_NO_ITEMS,
     CODE_NOT_FOUND,
@@ -401,6 +403,23 @@ async def send_rfq(
     return after
 
 
+async def _supplier_names(session: AsyncSession, company_id: str, rfq: dict) -> list[str]:
+    """The RFQ's suppliers by name, for an audit entry a person can read
+    ("suppliers: Bright Lights → Bright Lights, Malwa Cable") rather than
+    the raw rows."""
+    ids = [s["supplier_id"] for s in rfq["suppliers"]]
+    if not ids:
+        return []
+    rows = (
+        await session.execute(
+            text("SELECT id, name FROM suppliers WHERE company_id = :c AND id = ANY(CAST(:ids AS uuid[]))"),
+            {"c": company_id, "ids": ids},
+        )
+    ).mappings().all()
+    names = {r["id"]: r["name"] for r in rows}
+    return [names.get(i, str(i)) for i in ids]
+
+
 async def add_suppliers(
     session: AsyncSession,
     *,
@@ -455,8 +474,8 @@ async def add_suppliers(
         entity_id=rfq_id,
         entity_label=after["rfq_number"],
         description=f"{'Sent to' if sending else 'Supplier(s) added'}: {names}",
-        before=before,
-        after=after,
+        before={"suppliers": ", ".join(await _supplier_names(session, claims.company_id, before)) or None},
+        after={"suppliers": ", ".join(await _supplier_names(session, claims.company_id, after))},
         request=request,
     )
     await session.commit()
@@ -501,8 +520,8 @@ async def remove_supplier(
         entity_id=rfq_id,
         entity_label=after["rfq_number"],
         description="Supplier removed",
-        before=before,
-        after=after,
+        before={"suppliers": ", ".join(await _supplier_names(session, claims.company_id, before))},
+        after={"suppliers": ", ".join(await _supplier_names(session, claims.company_id, after)) or None},
         request=request,
     )
     await session.commit()
@@ -604,6 +623,32 @@ async def preview_import(
     return result.as_dict()
 
 
+async def find_by_reference(session: AsyncSession, *, company_id: str, reference: str) -> Optional[dict]:
+    """The live RFQ already imported under this enquiry number, if any.
+    Same comparison as `uq_rfq_external_reference`: this company only,
+    trimmed, case-insensitive, cancelled RFQs ignored."""
+    row = (
+        await session.execute(
+            text(
+                "SELECT id, rfq_number, status, external_source_name FROM rfqs "
+                "WHERE company_id = :c AND status <> 'cancelled' AND external_reference_number IS NOT NULL "
+                "AND lower(btrim(external_reference_number)) = lower(btrim(:ref)) LIMIT 1"
+            ),
+            {"c": company_id, "ref": reference},
+        )
+    ).mappings().first()
+    return dict(row) if row else None
+
+
+def _duplicate_reference(reference: str, existing: dict) -> ApiError:
+    return ApiError(
+        status.HTTP_409_CONFLICT,
+        CODE_DUPLICATE,
+        f"RFQ number {reference} was already imported as {existing['rfq_number']}",
+        errors=[{"field": "externalReferenceNumber", "message": f"Already imported as {existing['rfq_number']}"}],
+    )
+
+
 async def import_rfq(
     session: AsyncSession,
     *,
@@ -622,6 +667,18 @@ async def import_rfq(
 ) -> dict:
     if delivery_godown_id:
         assert_godown_in_scope(claims, delivery_godown_id)
+
+    reference = (external_reference_number or "").strip()
+    if not reference:
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            CODE_VALIDATION,
+            "Enter the RFQ / enquiry number from the file",
+            errors=[{"field": "externalReferenceNumber", "message": "Required"}],
+        )
+    existing = await find_by_reference(session, company_id=claims.company_id, reference=reference)
+    if existing:
+        raise _duplicate_reference(reference, existing)
 
     parsed = await rfq_import.parse(
         session,
@@ -648,7 +705,7 @@ async def import_rfq(
     rfq_number = await allocate(session, company_id=UUID(claims.company_id), doc_type="rfq", on=rfq_date)
     source_name = external_source_name.strip()
 
-    await session.execute(
+    insert = (
         text(
             "INSERT INTO rfqs (id, company_id, rfq_number, rfq_date, subject, delivery_godown_id, "
             "created_from, external_source_name, external_reference_number, source_file_name) "
@@ -662,10 +719,18 @@ async def import_rfq(
             "subject": (subject or "").strip() or f"Imported from {source_name}",
             "godown": delivery_godown_id,
             "src": source_name,
-            "ref": (external_reference_number or "").strip() or None,
+            "ref": reference,
             "file": filename,
         },
     )
+    try:
+        await session.execute(*insert)
+    except IntegrityError as exc:
+        # Two imports of the same enquiry at once: the check above passed
+        # for both, the index stops the second.
+        if "uq_rfq_external_reference" in str(getattr(exc, "orig", exc)):
+            raise _duplicate_reference(reference, {"rfq_number": "another RFQ just now"})
+        raise
 
     estimated_value = 0.0
     for line_no, row in enumerate(rows, start=1):

@@ -1,15 +1,16 @@
 "use client";
 
 import * as React from "react";
-import { FileUp, Package } from "lucide-react";
+import { Package } from "lucide-react";
 
 import { AsyncBoundary } from "@/components/common/async-state";
 import { DataToolbar, TablePagination } from "@/components/common/data-toolbar";
 import { FilterSelect } from "@/components/common/filter-select";
 import { PageHeader } from "@/components/common/page-header";
+import { PermissionGate } from "@/components/common/permission-gate";
 import { ProductFormDialog } from "@/components/products/product-form-dialog";
+import { ProductImportDialog } from "@/components/products/product-import-dialog";
 import { ProductTable } from "@/components/products/product-table";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useListControls } from "@/hooks/use-api";
 import { useBrands, useCategories, useProducts } from "@/hooks/use-catalog";
@@ -27,10 +28,9 @@ export function ProductsListScreen() {
         description="Manage your product catalog"
         actions={
           <>
-            <Button variant="outline">
-              <FileUp />
-              Import Excel
-            </Button>
+            <PermissionGate permission="product.create">
+              <ProductImportDialog onImported={() => state.refresh()} />
+            </PermissionGate>
             {/* Without this, a newly created product doesn't appear until
                 the user navigates away and back — the list's own query has
                 no way to know the dialog's mutation happened. */}
