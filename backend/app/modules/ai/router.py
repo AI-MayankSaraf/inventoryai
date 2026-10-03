@@ -4,7 +4,9 @@ The AI document pipeline's endpoints — `04_API_SPECIFICATION.md` §2.16.
 Permissions, and why each one:
 
 * `document.upload` / `document.view` / `document.download` — the file
-  itself, independent of what the AI made of it.
+  itself, independent of what the AI made of it. On top of these, each
+  document is only visible to someone who may read the record it feeds
+  (`query_service.DOCUMENT_TYPE_PERMISSION`, security audit H2).
 * `ai.view` — read an extraction.
 * `ai.review` — correct a field, edit a line, confirm or skip a match.
   Reviewing is *not* approving.
@@ -70,6 +72,7 @@ async def list_documents(
     return await query_service.list_documents(
         session,
         company_id=claims.company_id,
+        claims=claims,
         q=q,
         status_filter=status_filter,
         document_type=document_type,
@@ -187,12 +190,22 @@ async def upload_document(
     return {"document": document, "job_id": job_id, "duplicate_of": None}
 
 
+async def _assert_visible(session: AsyncSession, claims: AccessTokenClaims, document_id: UUID) -> None:
+    """Security audit H2: every single-document endpoint answers 404 — not
+    403, which would confirm the id exists — unless the caller may read that
+    *type* of document (a tax invoice needs `invoice.view`, and so on; see
+    `query_service.DOCUMENT_TYPE_PERMISSION`)."""
+    if not await query_service.document_visible(session, claims=claims, document_id=document_id):
+        raise ApiError(status.HTTP_404_NOT_FOUND, CODE_NOT_FOUND, "Document not found")
+
+
 @router.get("/documents/{document_id}", response_model=schemas.DocumentOut)
 async def get_document(
     document_id: UUID,
     claims: AccessTokenClaims = Depends(require_permission("document.view")),
     session: AsyncSession = Depends(get_tenant_session),
 ):
+    await _assert_visible(session, claims, document_id)
     document = await query_service.get_document(
         session, company_id=claims.company_id, document_id=document_id
     )
@@ -221,6 +234,7 @@ async def download_document(
     cannot be rewritten into one that renders a supplier's HTML in the
     user's session.
     """
+    await _assert_visible(session, claims, document_id)
     url, expires_at = await _signed_download(session, claims.company_id, document_id)
     return RedirectResponse(
         url,
@@ -241,6 +255,7 @@ async def download_link(
 ):
     """The same signed link as `/file`, as JSON — for a web page, which
     sends its token in a header and so cannot simply follow a redirect."""
+    await _assert_visible(session, claims, document_id)
     url, expires_at = await _signed_download(session, claims.company_id, document_id)
     return {"url": url, "expires_at": expires_at}
 
@@ -277,6 +292,7 @@ async def delete_document(
 ) -> None:
     """Delete an upload nothing was made from (BR-DOC-04). A document behind
     a quotation, proforma, invoice, image or logo is refused with 409."""
+    await _assert_visible(session, claims, document_id)
     try:
         deleted = await extraction_service.delete_document(
             session, company_id=claims.company_id, document_id=document_id
@@ -379,7 +395,7 @@ async def source_documents(
 ):
     """The uploaded files a business record was made from."""
     return await query_service.source_documents(
-        session, company_id=claims.company_id, linked_type=linked_type, linked_id=linked_id
+        session, company_id=claims.company_id, linked_type=linked_type, linked_id=linked_id, claims=claims
     )
 
 
@@ -389,6 +405,7 @@ async def job_status(
     claims: AccessTokenClaims = Depends(require_permission("document.view")),
     session: AsyncSession = Depends(get_tenant_session),
 ):
+    await _assert_visible(session, claims, document_id)
     job = await query_service.job_status(session, company_id=claims.company_id, document_id=document_id)
     if job is None:
         raise ApiError(status.HTTP_404_NOT_FOUND, CODE_NOT_FOUND, "Document not found")
@@ -407,6 +424,7 @@ async def retry_extraction(
     corrections on the old run stay readable, which matters when the
     question is "why did this change?".
     """
+    await _assert_visible(session, claims, document_id)
     document = await query_service.get_document(
         session, company_id=claims.company_id, document_id=document_id
     )
@@ -455,6 +473,7 @@ async def get_extraction(
     claims: AccessTokenClaims = Depends(require_permission("ai.view")),
     session: AsyncSession = Depends(get_tenant_session),
 ):
+    await _assert_visible(session, claims, document_id)
     extraction = await query_service.get_extraction(
         session, company_id=claims.company_id, document_id=document_id
     )
@@ -552,6 +571,7 @@ async def approve_extraction(
     without one, which is the "no auto-approval" guardrail in §8 expressed
     as an API shape rather than a setting.
     """
+    await _assert_visible(session, claims, document_id)
     result = await review_service.approve(
         session, claims=claims, document_id=document_id, rfq_id=body.rfq_id, request=request
     )
@@ -567,6 +587,7 @@ async def reject_extraction(
     claims: AccessTokenClaims = Depends(require_permission("ai.review")),
     session: AsyncSession = Depends(get_tenant_session),
 ):
+    await _assert_visible(session, claims, document_id)
     result = await review_service.reject(
         session, claims=claims, document_id=document_id, reason=body.reason, request=request
     )

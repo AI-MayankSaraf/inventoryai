@@ -112,11 +112,58 @@ The test suites in `tests/` use these accounts; `tests/run_all.py --isolated` se
 python -m app.db.seed
 ```
 
+## Secrets (passwords and keys) — Secrets Manager
+
+Since the security audit of 3 Oct 2026 (finding H5), database passwords,
+`JWT_SECRET`, `SECRETS_KEY`, the SMTP password and any AI API key live in
+**one Secrets Manager secret** (`inventoryai/backend`), not in `.env`.
+Locally that is Floci — the same container and port (4566) as S3, so its
+`--persist` folder keeps the secret across restarts. `.env` only says where
+the secret is:
+
+```
+SECRETS_MANAGER_SECRET_ID=inventoryai/backend
+```
+
+The API reads the secret at startup and **refuses to start** if it cannot,
+and also refuses to start — in every environment, development included —
+while `JWT_SECRET` is blank, the old `dev-secret-change-me`, or shorter than
+32 characters, or `SECRETS_KEY` is missing or equal to it.
+
+Moving the values (once, with Floci and Postgres running):
+
+```bash
+cd backend
+.venv\Scripts\activate
+python -m scripts.secrets_manager push        # copies .env values, generates strong keys,
+                                              # re-encrypts stored SMTP passwords, adds the ID to .env
+python -m scripts.secrets_manager verify      # all checks must say ok
+# restart Floci (docker restart floci), then verify again
+python -m scripts.secrets_manager strip-env   # blanks the values in .env
+```
+
+Day to day: `show` lists the keys and lengths, `reveal JWT_SECRET` prints one
+value (for psql or recovery), and `push` again after editing a value in
+`.env` updates the secret. Precedence is: real environment variables, then
+the secret, then `.env` — so a test runner can still point `DATABASE_URL` at
+a test database.
+
+`push` replaces a weak or default `JWT_SECRET`, which signs everybody out
+once. Throwaway local database only: `ALLOW_DEV_SECRET=true` lets the API
+start on the defaults (ignored outside development).
+
+On real AWS: leave `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` and
+`AWS_ENDPOINT_URL` blank, and give the server's IAM role
+`secretsmanager:GetSecretValue` on this one secret.
+
 ## Run
 
 ```bash
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --host 127.0.0.1
 ```
+
+Keep `--host 127.0.0.1` (uvicorn's default): it means only this PC can
+reach the API. `--host 0.0.0.0` opens it to everyone on the same Wi-Fi.
 
 - `http://localhost:8000/health` — DB connectivity, current migration, extensions, RLS table count
 - `http://localhost:8000/docs` — interactive docs for every endpoint
@@ -126,9 +173,9 @@ inside this process (`EXTRACTION_WORKER=embedded`), so nothing else needs
 starting. To run it separately — the Docker setup does — set
 `EXTRACTION_WORKER=external` and start `python -m app.worker` alongside.
 
-With `ENVIRONMENT` set to anything but development, the API also refuses to
-start while `JWT_SECRET`/`SECRETS_KEY` are weak or `DEBUG` is on (see
-`.env.example`).
+The API refuses to start while `JWT_SECRET`/`SECRETS_KEY` are weak or the
+public default (any environment), or while `DEBUG` is on outside
+development — see "Secrets" above.
 
 On boot the app verifies that `APP_DATABASE_URL`'s role cannot bypass RLS, and refuses to start if it can, naming the role and the fix.
 

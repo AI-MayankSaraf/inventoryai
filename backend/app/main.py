@@ -127,13 +127,15 @@ class InsecureConfigurationError(RuntimeError):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Weak secrets or DEBUG outside development: refuse to serve at all.
+    # Weak or default secrets (any environment — security audit H5), or
+    # DEBUG outside development: refuse to serve at all.
     problems = settings.production_problems()
     if problems:
         raise InsecureConfigurationError(
-            f"ENVIRONMENT={settings.environment} is not development, and this configuration is not safe to run:\n"
+            f"ENVIRONMENT={settings.environment}: this configuration is not safe to run:\n"
             + "\n".join(f"  - {p}" for p in problems)
-            + "\n\nGenerate secrets with:  python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+            + "\n\nKeep secrets in Secrets Manager:  python -m scripts.secrets_manager push"
+            + "\n(Throwaway local database only: ALLOW_DEV_SECRET=true skips the secret checks.)"
         )
     # Fail fast on boot if the DB is unreachable, rather than on first request.
     async with engine.connect() as conn:

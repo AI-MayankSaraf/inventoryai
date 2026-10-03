@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import clock
 from app.core import audit
-from app.core.deps import assert_godown_in_scope
+from app.core.deps import assert_godown_in_scope, godown_readable, procurement_godown_filter
 from app.core.errors import (
     CODE_BATCH_EXPIRED,
     CODE_BATCH_REQUIRED,
@@ -119,12 +119,25 @@ async def _reversal(session: AsyncSession, *, grn_id: UUID) -> Optional[dict]:
     }
 
 
+def _assert_readable(claims: Optional[AccessTokenClaims], grn: dict) -> None:
+    """Security audit H3 / BR-AUTH-12: a godown-scoped user reads receipts of
+    their own godowns only. 404 rather than 403, as for another tenant's id:
+    a refusal would confirm the receipt exists."""
+    if claims is not None and not godown_readable(claims, grn.get("godown_id")):
+        raise ApiError(status.HTTP_404_NOT_FOUND, CODE_NOT_FOUND, "Goods receipt not found")
+
+
 async def list_grns(
     session: AsyncSession, *, company_id: str, limit: int = 100, offset: int = 0, status_filter: Optional[str] = None,
-    purchase_order_id: Optional[UUID] = None,
+    purchase_order_id: Optional[UUID] = None, claims: Optional[AccessTokenClaims] = None,
 ) -> list[dict]:
     where = ["company_id = :c"]
     params: dict = {"c": company_id, "limit": limit, "offset": offset}
+    if claims is not None:
+        scope, scope_params = procurement_godown_filter(claims, "godown_id")
+        if scope:
+            where.append(scope)
+            params.update(scope_params)
     if status_filter:
         where.append("status = :status")
         params["status"] = status_filter
@@ -148,8 +161,12 @@ async def list_grns(
     return [{**dict(r), "items": []} for r in rows]
 
 
-async def get_grn(session: AsyncSession, *, company_id: str, grn_id: UUID) -> dict:
-    return await _load(session, company_id=company_id, grn_id=grn_id)
+async def get_grn(
+    session: AsyncSession, *, company_id: str, grn_id: UUID, claims: Optional[AccessTokenClaims] = None
+) -> dict:
+    grn = await _load(session, company_id=company_id, grn_id=grn_id)
+    _assert_readable(claims, grn)
+    return grn
 
 
 async def _resolve_batch(session: AsyncSession, *, company_id: str, product_variant_id: UUID, item) -> Optional[UUID]:
@@ -655,11 +672,13 @@ async def update_draft_grn(
     return after
 
 
-async def list_postings(session: AsyncSession, *, company_id: str, grn_id: UUID) -> list[dict]:
+async def list_postings(
+    session: AsyncSession, *, company_id: str, grn_id: UUID, claims: Optional[AccessTokenClaims] = None
+) -> list[dict]:
     """Every ledger row this receipt produced — the confirmation postings
     and, if it was reversed, the offsetting ones. The detail screen's
     "posted" column and the confirmation panel both read this."""
-    await _load(session, company_id=company_id, grn_id=grn_id)
+    _assert_readable(claims, await _load(session, company_id=company_id, grn_id=grn_id))
     rows = (
         await session.execute(
             text(
@@ -715,8 +734,10 @@ async def refresh_grn_alerts(session: AsyncSession, *, claims: AccessTokenClaims
         return []
 
 
-async def list_variances(session: AsyncSession, *, company_id: str, grn_id: UUID) -> list[dict]:
-    await _load(session, company_id=company_id, grn_id=grn_id)
+async def list_variances(
+    session: AsyncSession, *, company_id: str, grn_id: UUID, claims: Optional[AccessTokenClaims] = None
+) -> list[dict]:
+    _assert_readable(claims, await _load(session, company_id=company_id, grn_id=grn_id))
     return await variance_service.list_variances(
         session, company_id=UUID(company_id), compare_doc_id=grn_id
     )

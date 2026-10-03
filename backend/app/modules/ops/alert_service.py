@@ -29,6 +29,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import commit_and_rescope
+from app.core.deps import procurement_godown_filter
 from app.core.security import AccessTokenClaims
 from app.modules.ops.alert_rules import QUERIES, RULES, RULES_BY_CODE, render
 
@@ -290,6 +291,12 @@ _FEED_SELECT = """
 """
 
 
+def _alert_scope(claims: AccessTokenClaims, alias: str = "a") -> tuple[str, dict]:
+    """Security audit H3 / BR-AUTH-12: a godown-scoped user sees alerts for
+    their own godowns, plus company-wide alerts that name no godown."""
+    return procurement_godown_filter(claims, f"{alias}.godown_id", include_null=True)
+
+
 async def list_alerts(
     session: AsyncSession,
     *,
@@ -303,6 +310,10 @@ async def list_alerts(
 ) -> list[dict]:
     where = ["a.company_id = :c"]
     params: dict = {"c": claims.company_id, "viewer": UUID(claims.user_id)}
+    scope, scope_params = _alert_scope(claims)
+    if scope:
+        where.append(scope)
+        params.update(scope_params)
 
     if severity:
         where.append("a.severity = :severity")
@@ -336,6 +347,8 @@ async def summary(session: AsyncSession, *, claims: AccessTokenClaims) -> dict:
     Only open alerts count: a resolved one is history, and a badge that
     included it would never go down.
     """
+    scope, scope_params = _alert_scope(claims)
+    scope_sql = f" AND {scope}" if scope else ""
     row = (
         await session.execute(
             text(
@@ -347,9 +360,9 @@ async def summary(session: AsyncSession, *, claims: AccessTokenClaims) -> dict:
                 " COUNT(*) FILTER (WHERE a.severity = 'low') AS low "
                 "FROM alerts a "
                 "LEFT JOIN alert_reads ar ON ar.alert_id = a.id AND ar.user_id = :viewer "
-                "WHERE a.company_id = :c AND a.status IN ('new','acknowledged')"
+                "WHERE a.company_id = :c AND a.status IN ('new','acknowledged')" + scope_sql
             ),
-            {"c": claims.company_id, "viewer": UUID(claims.user_id)},
+            {"c": claims.company_id, "viewer": UUID(claims.user_id), **scope_params},
         )
     ).mappings().first()
     return {
@@ -366,10 +379,11 @@ async def summary(session: AsyncSession, *, claims: AccessTokenClaims) -> dict:
 
 async def mark_read(session: AsyncSession, *, claims: AccessTokenClaims, alert_id: UUID) -> Optional[dict]:
     """BR-ALT-03: read state is per user, in its own table."""
+    scope, scope_params = _alert_scope(claims, "alerts")
     exists = (
         await session.execute(
-            text("SELECT 1 FROM alerts WHERE id = :id AND company_id = :c"),
-            {"id": alert_id, "c": claims.company_id},
+            text("SELECT 1 FROM alerts WHERE id = :id AND company_id = :c" + (f" AND {scope}" if scope else "")),
+            {"id": alert_id, "c": claims.company_id, **scope_params},
         )
     ).first()
     if not exists:
@@ -390,14 +404,16 @@ async def mark_read(session: AsyncSession, *, claims: AccessTokenClaims, alert_i
 async def mark_all_read(session: AsyncSession, *, claims: AccessTokenClaims) -> int:
     """"Mark all as read" means *for me* -- so this writes one row per alert
     for this user, and leaves everyone else's feed alone."""
+    scope, scope_params = _alert_scope(claims)
     result = await session.execute(
         text(
             "INSERT INTO alert_reads (company_id, alert_id, user_id) "
             "SELECT a.company_id, a.id, :u FROM alerts a "
             "WHERE a.company_id = :c AND a.status IN ('new','acknowledged') "
-            "ON CONFLICT (alert_id, user_id) DO NOTHING"
+            + (f"AND {scope} " if scope else "")
+            + "ON CONFLICT (alert_id, user_id) DO NOTHING"
         ),
-        {"c": claims.company_id, "u": UUID(claims.user_id)},
+        {"c": claims.company_id, "u": UUID(claims.user_id), **scope_params},
     )
     await session.commit()
     return result.rowcount or 0
@@ -421,8 +437,11 @@ async def set_status(
         sets += ["dismissed_at = now()", "dismissed_by = :who"]
         params["who"] = UUID(claims.user_id)
 
+    scope, scope_params = _alert_scope(claims, "alerts")
+    params.update(scope_params)
+    scope_sql = f" AND {scope}" if scope else ""
     result = await session.execute(
-        text(f"UPDATE alerts SET {', '.join(sets)} WHERE id = :id AND company_id = :c RETURNING id"),
+        text(f"UPDATE alerts SET {', '.join(sets)} WHERE id = :id AND company_id = :c{scope_sql} RETURNING id"),
         params,
     )
     if result.first() is None:

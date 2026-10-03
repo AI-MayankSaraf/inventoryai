@@ -22,6 +22,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.deps import procurement_godown_filter
 from app.core.security import AccessTokenClaims
 from app.modules.inventory import stock_service
 
@@ -76,13 +77,23 @@ async def dashboard_summary(
     in_stock = sum(1 for r in rows if r["status"] == "in_stock")
     low_stock_rows = await stock_service.list_low_stock(session, claims=claims, godown_id=godown_id, limit=8)
 
+    # Security audit H3 / BR-AUTH-12: a godown-scoped user's tiles count
+    # their own godowns only. Each fragment is "" (no restriction) for an
+    # all-godowns user. The fragments share one bind parameter.
+    po_scope, scope_params = procurement_godown_filter(claims, "delivery_godown_id")
+    rfq_scope, _ = procurement_godown_filter(claims, "delivery_godown_id", include_null=True)
+    godown_scope, _ = procurement_godown_filter(claims, "id")
+    po_and = f" AND {po_scope}" if po_scope else ""
+    rfq_and = f" AND {rfq_scope}" if rfq_scope else ""
+    godown_and = f" AND {godown_scope}" if godown_scope else ""
+
     counts = (
         await session.execute(
             text(
-                """
+                f"""
                 SELECT
                   (SELECT COUNT(*) FROM godowns
-                    WHERE company_id = :c AND deleted_at IS NULL AND is_active) AS godown_count,
+                    WHERE company_id = :c AND deleted_at IS NULL AND is_active{godown_and}) AS godown_count,
                   -- Neither `products` nor `product_variants` carries a
                   -- created_at column, so "added this month" cannot come
                   -- from the catalogue itself. The audit log is the actual
@@ -99,28 +110,31 @@ async def dashboard_summary(
                   (SELECT COUNT(*) FROM purchase_orders
                     WHERE company_id = :c
                       AND status IN ('draft', 'pending_approval', 'approved', 'sent',
-                                     'acknowledged', 'partially_received')) AS pending_pos,
+                                     'acknowledged', 'partially_received'){po_and}) AS pending_pos,
                   (SELECT COALESCE(SUM(total_amount), 0) FROM purchase_orders
                     WHERE company_id = :c
                       AND status IN ('draft', 'pending_approval', 'approved', 'sent',
-                                     'acknowledged', 'partially_received')) AS po_value_pending,
+                                     'acknowledged', 'partially_received'){po_and}) AS po_value_pending,
                   (SELECT COUNT(*) FROM rfqs
                     WHERE company_id = :c
-                      AND status IN ('sent', 'partially_quoted', 'quoted', 'under_review')) AS open_rfqs,
+                      AND status IN ('sent', 'partially_quoted', 'quoted', 'under_review'){rfq_and}) AS open_rfqs,
                   (SELECT COUNT(*) FROM supplier_quotations
                     WHERE company_id = :c AND status IN ('draft', 'under_review')) AS quotations_pending,
                   (SELECT COUNT(*) FROM purchase_orders
-                    WHERE company_id = :c AND status = 'pending_approval') AS approvals_pending,
+                    WHERE company_id = :c AND status = 'pending_approval'{po_and}) AS approvals_pending,
                   (SELECT COUNT(*) FROM purchase_orders
                     WHERE company_id = :c
-                      AND status IN ('sent', 'acknowledged', 'partially_received')) AS deliveries_pending
+                      AND status IN ('sent', 'acknowledged', 'partially_received'){po_and}) AS deliveries_pending
                 """
             ),
-            {"c": claims.company_id},
+            {"c": claims.company_id, **scope_params},
         )
     ).mappings().first()
 
-    activity_rows = (
+    # Security audit H3: the feed is audit-log rows, so it needs `audit.view`
+    # — the same gate as the audit trail screen. Without it the panel is
+    # simply empty rather than a side door into the log.
+    activity_rows = [] if "audit.view" not in claims.permissions else (
         await session.execute(
             text(
                 """

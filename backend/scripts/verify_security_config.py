@@ -1,4 +1,5 @@
-"""Checks the production-secrets guard and the request rate limiter.
+"""Checks the startup secrets guard (security audit H5), the Secrets Manager
+loading, and the request rate limiter.
 
 Needs no running server or database:
 
@@ -44,7 +45,16 @@ def main() -> int:
     s = settings(jwt_secret="")
     check("S01 a blank JWT_SECRET means the development default, never an empty signing key",
           s.jwt_secret == DEV_JWT_SECRET, s.jwt_secret)
-    check("S02 development starts with the defaults", settings(environment="development").production_problems() == [])
+    # Security audit H5: the public development key is refused everywhere now.
+    problems = settings(environment="development").production_problems()
+    check("S02 development REFUSES the public default JWT key (audit H5)",
+          any("JWT_SECRET" in p for p in problems), problems)
+    check("S02b development with ALLOW_DEV_SECRET=true starts on the defaults (throwaway DB only)",
+          settings(environment="development", allow_dev_secret=True).production_problems() == [])
+    problems = settings(environment="production", allow_dev_secret=True).production_problems()
+    check("S02c ALLOW_DEV_SECRET is ignored outside development", any("JWT_SECRET" in p for p in problems), problems)
+    check("S02d development with strong, distinct secrets starts even with DEBUG on",
+          settings(environment="development", jwt_secret=STRONG, secrets_key=OTHER, debug=True).production_problems() == [])
 
     problems = settings(environment="production").production_problems()
     check("S03 production refuses the default JWT secret", any("JWT_SECRET" in p for p in problems), problems)
@@ -57,6 +67,48 @@ def main() -> int:
     check("S07 production refuses SECRETS_KEY equal to JWT_SECRET", any("SECRETS_KEY" in p for p in problems), problems)
     problems = settings(environment="production", jwt_secret=STRONG, secrets_key=OTHER, debug=False).production_problems()
     check("S08 production with strong, distinct secrets and DEBUG off starts", problems == [], problems)
+
+    print("\n[secrets manager]")
+    from unittest import mock
+
+    from app.core import config, secrets_manager
+
+    secret = {"DATABASE_URL": "postgresql+asyncpg://o:p@h/db", "APP_DATABASE_URL": "postgresql+asyncpg://a:p@h/db",
+              "PLATFORM_DATABASE_URL": "postgresql+asyncpg://pl:p@h/db", "JWT_SECRET": STRONG, "SECRETS_KEY": OTHER,
+              "SMTP_PASSWORD": "", "SOMETHING_NEW": "ignored"}
+    base = settings(secrets_manager_secret_id="inventoryai/backend", jwt_secret="from-env-file")
+    with mock.patch.object(secrets_manager, "fetch_raw", return_value=dict(secret)):
+        overrides = secrets_manager.load_overrides(base)
+    check("M01 secret keys map to settings fields; unknown keys are ignored",
+          overrides.get("jwt_secret") == STRONG and "something_new" not in overrides, sorted(overrides))
+    with mock.patch.object(secrets_manager, "fetch_raw", return_value={**secret, "JWT_SECRET": ""}):
+        try:
+            secrets_manager.load_overrides(base)
+            check("M02 a secret missing JWT_SECRET stops startup", False, "no error")
+        except secrets_manager.SecretsUnavailableError as exc:
+            check("M02 a secret missing JWT_SECRET stops startup", "JWT_SECRET" in str(exc), exc)
+    with mock.patch.object(secrets_manager, "fetch_raw", side_effect=secrets_manager.SecretsUnavailableError("down")), \
+            mock.patch.object(config, "Settings", lambda **kw: settings(secrets_manager_secret_id="x", **kw)):
+        config.get_settings.cache_clear()
+        try:
+            config.get_settings()
+            check("M03 an unreachable Secrets Manager stops startup (fail closed)", False, "started")
+        except secrets_manager.SecretsUnavailableError:
+            check("M03 an unreachable Secrets Manager stops startup (fail closed)", True)
+    with mock.patch.object(secrets_manager, "fetch_raw", return_value=dict(secret)), \
+            mock.patch.object(config, "Settings", lambda **kw: settings(**{"secrets_manager_secret_id": "x", "jwt_secret": "env", **kw})):
+        config.get_settings.cache_clear()
+        loaded = config.get_settings()
+        check("M04 Secrets Manager values win over .env", loaded.jwt_secret == STRONG and loaded.secrets_key == OTHER,
+              loaded.jwt_secret[:6])
+    with mock.patch.object(secrets_manager, "fetch_raw", return_value=dict(secret)), \
+            mock.patch.object(config, "Settings", lambda **kw: settings(**{"secrets_manager_secret_id": "x", **kw})), \
+            mock.patch.dict("os.environ", {"DATABASE_URL": "postgresql+asyncpg://t:t@h/inventoryai_test"}):
+        config.get_settings.cache_clear()
+        loaded = config.get_settings()
+        check("M05 a real environment variable still wins over the secret (test runner safety)",
+              loaded.database_url.endswith("/inventoryai_test") and loaded.jwt_secret == STRONG, loaded.database_url)
+    config.get_settings.cache_clear()
 
     try:
         settings(rate_limit_login="lots")

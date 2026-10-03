@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import clock
 from app.core import audit
-from app.core.deps import assert_godown_in_scope
+from app.core.deps import assert_godown_in_scope, godown_readable, procurement_godown_filter
 from app.core.errors import (
     CODE_APPROVAL_LIMIT_EXCEEDED,
     CODE_BUSINESS_RULE_VIOLATION,
@@ -84,10 +84,17 @@ async def _load(session: AsyncSession, *, company_id: str, po_id: UUID) -> dict:
 
 async def list_pos(
     session: AsyncSession, *, company_id: str, limit: int = 100, offset: int = 0, status_filter: Optional[str] = None,
-    supplier_id: Optional[UUID] = None,
+    supplier_id: Optional[UUID] = None, claims: Optional[AccessTokenClaims] = None,
 ) -> list[dict]:
     where = ["company_id = :c"]
     params: dict = {"c": company_id, "limit": limit, "offset": offset}
+    if claims is not None:
+        # Security audit H3 / BR-AUTH-12: a godown-scoped user sees POs
+        # delivering into their own godowns only.
+        scope, scope_params = procurement_godown_filter(claims, "delivery_godown_id")
+        if scope:
+            where.append(scope)
+            params.update(scope_params)
     if status_filter:
         where.append("status = :status")
         params["status"] = status_filter
@@ -117,8 +124,14 @@ async def list_pos(
     return [{**dict(r), "items": []} for r in rows]
 
 
-async def get_po(session: AsyncSession, *, company_id: str, po_id: UUID) -> dict:
-    return await _load(session, company_id=company_id, po_id=po_id)
+async def get_po(
+    session: AsyncSession, *, company_id: str, po_id: UUID, claims: Optional[AccessTokenClaims] = None
+) -> dict:
+    po = await _load(session, company_id=company_id, po_id=po_id)
+    if claims is not None and not godown_readable(claims, po.get("delivery_godown_id")):
+        # 404, not 403: a refusal would confirm the PO exists.
+        raise ApiError(status.HTTP_404_NOT_FOUND, CODE_NOT_FOUND, "Purchase order not found")
+    return po
 
 
 async def _auto_fill_from_rfq(session: AsyncSession, *, company_id: str, rfq_id: UUID) -> list[dict]:

@@ -12,8 +12,10 @@ from functools import lru_cache
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-#: Signs tokens on a development machine only; `production_problems()`
-#: refuses to start anywhere else while it is in use.
+#: The old fallback signing key. It is printed right here in the source, so a
+#: token signed with it can be forged by anyone (security audit H5). The API
+#: now refuses to start with it in every environment, unless a developer sets
+#: ALLOW_DEV_SECRET=true on their own laptop for a throwaway database.
 DEV_JWT_SECRET = "dev-secret-change-me"
 #: 32 random bytes is what HS256 needs to be unguessable.
 MIN_SECRET_LENGTH = 32
@@ -25,6 +27,19 @@ class Settings(BaseSettings):
     app_name: str = "InventoryAI"
     environment: str = Field(default="development")
     debug: bool = Field(default=True)
+
+    # ------------------------------------------------------- Secrets Manager
+    # Where the passwords and keys live (app/core/secrets_manager.py). When
+    # set, `get_settings()` reads this secret at startup and its values win
+    # over `.env`; if it cannot be read the process refuses to start.
+    # Blank = read everything from the environment (the old behaviour).
+    secrets_manager_secret_id: str = Field(default="")
+    # Blank = use AWS_ENDPOINT_URL (Floci serves S3 and Secrets Manager on
+    # the same port), and on real AWS both stay blank.
+    secrets_manager_endpoint_url: str = Field(default="")
+    # Escape hatch for a throwaway local database only: lets the API start on
+    # the public development JWT key. Ignored outside development.
+    allow_dev_secret: bool = Field(default=False)
 
     # Postgres — asyncpg driver. Three roles, three purposes (see
     # alembic/versions/..._rls_policies.py for why): `database_url` is the
@@ -49,9 +64,10 @@ class Settings(BaseSettings):
 
     jwt_secret: str = Field(default=DEV_JWT_SECRET)
     # Key for encrypting secrets at rest (currently per-company SMTP
-    # passwords, via pgcrypto). Falls back to `jwt_secret` so a dev install
-    # works unconfigured; set it explicitly in production, and note that
-    # rotating it makes previously stored secrets unreadable.
+    # passwords, via pgcrypto). Must be its own value (production_problems);
+    # the fallback to `jwt_secret` survives only for ALLOW_DEV_SECRET
+    # laptops. Rotating it makes stored SMTP passwords unreadable unless they
+    # are re-encrypted — `scripts/secrets_manager.py push` does that.
     secrets_key: str = Field(default="")
     jwt_access_ttl_minutes: int = Field(default=15)
 
@@ -247,12 +263,21 @@ class Settings(BaseSettings):
     def is_development(self) -> bool:
         return self.environment.lower() in {"development", "dev", "local", "test"}
 
+    @property
+    def dev_secret_allowed(self) -> bool:
+        return self.is_development and self.allow_dev_secret
+
     def production_problems(self) -> list[str]:
-        """What makes this configuration unsafe to serve real users with.
-        Empty in development, where the defaults are deliberate."""
-        if self.is_development:
-            return []
+        """What makes this configuration unsafe to start with.
+
+        Since security audit H5 the secret checks apply in development too:
+        a laptop API reachable over Wi-Fi with the public key in the source
+        lets anyone on that network sign in as the platform admin. Only
+        DEBUG stays allowed in development. ALLOW_DEV_SECRET=true (development
+        only) switches the secret checks off for a throwaway database."""
         problems = []
+        if self.dev_secret_allowed:
+            return problems
         if self.jwt_secret == DEV_JWT_SECRET or len(self.jwt_secret) < MIN_SECRET_LENGTH:
             problems.append(
                 f"JWT_SECRET is the development default or shorter than {MIN_SECRET_LENGTH} characters, "
@@ -263,11 +288,33 @@ class Settings(BaseSettings):
                 f"SECRETS_KEY must be set to its own value of at least {MIN_SECRET_LENGTH} characters "
                 "(it encrypts stored SMTP passwords; it must not be the JWT secret)."
             )
-        if self.debug:
+        if self.debug and not self.is_development:
             problems.append("DEBUG is on, which sends Python tracebacks to API callers. Set DEBUG=false.")
         return problems
 
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    """Settings, in this order of precedence:
+
+        1. real environment variables (a test runner pointing DATABASE_URL at
+           the test database must never be overruled by the secret)
+        2. the Secrets Manager secret, when SECRETS_MANAGER_SECRET_ID is set
+        3. `backend/.env`
+        4. the defaults above
+
+    Built once per process. A secret that is configured but unreadable
+    raises `SecretsUnavailableError`, so nothing starts on half a config."""
+    settings = Settings()
+    if not settings.secrets_manager_secret_id:
+        return settings
+    import os
+
+    from app.core import secrets_manager
+
+    overrides = secrets_manager.load_overrides(settings)
+    from_environment = {name.lower() for name in os.environ}
+    overrides = {field: value for field, value in overrides.items() if field not in from_environment}
+    # Init values outrank `.env`; the environment's own values were removed
+    # above, so they keep winning.
+    return Settings(**overrides)

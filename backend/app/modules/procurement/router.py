@@ -12,7 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_tenant_session, require_any_permission, require_permission
+from app.core.deps import get_tenant_session, require_all_permissions, require_any_permission, require_permission
 from app.core.security import AccessTokenClaims
 from app.modules.documents.schemas import VarianceOut as DocVarianceOut
 from app.modules.procurement import (
@@ -236,7 +236,7 @@ async def list_pos(
     claims: AccessTokenClaims = Depends(require_any_permission("po.view", "grn.create")),
     session: AsyncSession = Depends(get_tenant_session),
 ):
-    return await po_service.list_pos(session, company_id=claims.company_id, limit=limit, offset=offset, status_filter=status_filter, supplier_id=supplier_id)
+    return await po_service.list_pos(session, company_id=claims.company_id, limit=limit, offset=offset, status_filter=status_filter, supplier_id=supplier_id, claims=claims)
 
 
 @router.post("/purchase-orders", response_model=schemas.PoOut, status_code=status.HTTP_201_CREATED)
@@ -255,7 +255,7 @@ async def get_po(
     claims: AccessTokenClaims = Depends(require_any_permission("po.view", "grn.create")),
     session: AsyncSession = Depends(get_tenant_session),
 ):
-    return await po_service.get_po(session, company_id=claims.company_id, po_id=po_id)
+    return await po_service.get_po(session, company_id=claims.company_id, po_id=po_id, claims=claims)
 
 
 @router.patch("/purchase-orders/{po_id}", response_model=schemas.PoOut)
@@ -342,7 +342,7 @@ async def list_grns(
     claims: AccessTokenClaims = Depends(require_permission("grn.view")),
     session: AsyncSession = Depends(get_tenant_session),
 ):
-    return await grn_service.list_grns(session, company_id=claims.company_id, limit=limit, offset=offset, status_filter=status_filter, purchase_order_id=purchase_order_id)
+    return await grn_service.list_grns(session, company_id=claims.company_id, limit=limit, offset=offset, status_filter=status_filter, purchase_order_id=purchase_order_id, claims=claims)
 
 
 @router.post("/goods-receipts", response_model=schemas.GrnOut, status_code=status.HTTP_201_CREATED)
@@ -361,7 +361,7 @@ async def get_grn(
     claims: AccessTokenClaims = Depends(require_permission("grn.view")),
     session: AsyncSession = Depends(get_tenant_session),
 ):
-    return await grn_service.get_grn(session, company_id=claims.company_id, grn_id=grn_id)
+    return await grn_service.get_grn(session, company_id=claims.company_id, grn_id=grn_id, claims=claims)
 
 
 @router.patch("/goods-receipts/{grn_id}", response_model=schemas.GrnOut)
@@ -387,7 +387,7 @@ async def grn_postings(
     more roles than the stock ledger behind it."""
     if "inventory.view" not in claims.permissions:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Missing permission: inventory.view")
-    return await grn_service.list_postings(session, company_id=claims.company_id, grn_id=grn_id)
+    return await grn_service.list_postings(session, company_id=claims.company_id, grn_id=grn_id, claims=claims)
 
 
 @router.get("/goods-receipts/{grn_id}/variances", response_model=list[DocVarianceOut])
@@ -399,7 +399,7 @@ async def grn_variances(
     """What arrived against what was ordered (`grn_vs_po`), recorded when
     the receipt was confirmed. Gated on `grn.view` like the receipt itself —
     the generic `/variances` list is a payables screen with its own gate."""
-    return await grn_service.list_variances(session, company_id=claims.company_id, grn_id=grn_id)
+    return await grn_service.list_variances(session, company_id=claims.company_id, grn_id=grn_id, claims=claims)
 
 
 @router.post("/goods-receipts/{grn_id}/confirm", response_model=schemas.GrnConfirmOut)
@@ -593,7 +593,10 @@ async def convert_comparison(
     comparison_id: UUID,
     body: schemas.ComparisonConvertRequest,
     request: Request,
-    claims: AccessTokenClaims = Depends(require_permission("comparison.create")),
+    # Security audit H4: converting *creates purchase orders*, so it needs
+    # the convert permission the UI gates on AND `po.create` — never just
+    # `comparison.create`, which a buyer without PO rights may hold.
+    claims: AccessTokenClaims = Depends(require_all_permissions("comparison.convert", "po.create")),
     session: AsyncSession = Depends(get_tenant_session),
 ):
     purchase_orders, comparison_status = await comparison_service.convert_comparison(

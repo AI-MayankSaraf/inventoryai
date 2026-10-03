@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import audit, storage
 from app.core.config import get_settings
 from app.core.db import commit_and_rescope
-from app.core.deps import assert_godown_in_scope
+from app.core.deps import assert_godown_in_scope, godown_readable
 from app.core.errors import CODE_DUPLICATE, CODE_NOT_FOUND, CODE_VALIDATION, ApiError
 from app.core.security import AccessTokenClaims
 from app.modules.ai import extraction_service
@@ -226,7 +226,14 @@ async def list_for_record(
 ) -> list[dict]:
     kind = _kind(linked_type)
     _require_any(claims, kind.view_permissions)
-    await _record(session, claims, kind, linked_id)
+    record = await _record(session, claims, kind, linked_id)
+    # Security audit H2/H3: a GRN's challan belongs to that godown. Same
+    # read rule as the receipt itself — and the same 404 for out-of-scope.
+    if kind.godown_column and not (
+        godown_readable(claims, record["godown_id"])
+        or (kind.godown_override and kind.godown_override in claims.permissions)
+    ):
+        raise ApiError(status.HTTP_404_NOT_FOUND, CODE_NOT_FOUND, "Record not found")
     rows = (
         await session.execute(
             text(_LIST_SQL.replace("{where}", "l.linked_type = :t AND l.linked_id = :id")),

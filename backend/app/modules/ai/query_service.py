@@ -24,6 +24,57 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.ai import providers
 
+# ------------------------------------------------------------ who may see what
+#
+# Security audit H2 (3 Oct 2026). `document.view` / `document.download` say
+# a person may handle files at all; they do not say *which* files. A
+# supplier's tax invoice carries purchase prices, margins and bank details,
+# so seeing it needs the same permission as seeing the invoice record it
+# feeds. Each document type maps to the permission of the record it becomes.
+DOCUMENT_TYPE_PERMISSION: dict[str, str] = {
+    "supplier_quotation": "quotation.view",
+    "rate_list": "quotation.view",
+    "price_revision": "quotation.view",
+    "proforma_invoice": "proforma.view",
+    "tax_invoice": "invoice.view",
+    "purchase_order": "po.view",
+    "delivery_challan": "grn.view",
+}
+#: Not yet classified (`other`, `unrecognised`, still queued): could be any
+#: of the above, so only the people who work the AI queue see it.
+UNCLASSIFIED_DOCUMENT_PERMISSION = "ai.view"
+
+
+def document_access_filter(claims, alias: str = "d") -> tuple[str, dict]:
+    """SQL fragment (ANDed into a query on `documents`) limiting rows to the
+    types the caller may read. The uploader always sees their own upload —
+    they already hold the bytes, and the upload screen follows its job."""
+    permissions = set(claims.permissions)
+    allowed = sorted(t for t, code in DOCUMENT_TYPE_PERMISSION.items() if code in permissions)
+    parts = [f"{alias}.uploaded_by = CAST(:doc_viewer_id AS uuid)"]
+    params: dict = {"doc_viewer_id": str(claims.user_id)}
+    if allowed:
+        parts.append(f"{alias}.document_type = ANY(CAST(:doc_allowed_types AS text[]))")
+        params["doc_allowed_types"] = allowed
+    if UNCLASSIFIED_DOCUMENT_PERMISSION in permissions:
+        parts.append(
+            f"({alias}.document_type IS NULL OR NOT ({alias}.document_type = ANY(CAST(:doc_mapped_types AS text[]))))"
+        )
+        params["doc_mapped_types"] = sorted(DOCUMENT_TYPE_PERMISSION)
+    return "(" + " OR ".join(parts) + ")", params
+
+
+async def document_visible(session: AsyncSession, *, claims, document_id: UUID) -> bool:
+    clause, params = document_access_filter(claims)
+    row = (
+        await session.execute(
+            text(f"SELECT 1 FROM documents d WHERE d.company_id = :c AND d.id = :id AND {clause}"),
+            {"c": claims.company_id, "id": document_id, **params},
+        )
+    ).first()
+    return row is not None
+
+
 _DOCUMENT_SELECT = """
     SELECT d.id, d.original_filename, d.mime_type, d.file_extension, d.file_size_bytes,
            d.sha256_hash, d.page_count, d.document_type, d.document_type_confidence,
@@ -44,6 +95,7 @@ async def list_documents(
     session: AsyncSession,
     *,
     company_id: str,
+    claims=None,
     q: Optional[str] = None,
     status_filter: Optional[str] = None,
     document_type: Optional[str] = None,
@@ -60,6 +112,10 @@ async def list_documents(
         "d.processing_status <> 'uploaded'",
     ]
     params: dict = {"c": company_id, "limit": limit, "offset": offset}
+    if claims is not None:
+        clause, access_params = document_access_filter(claims)
+        where.append(clause)
+        params.update(access_params)
     if q:
         where.append("(d.original_filename ILIKE :q OR COALESCE(s.name, '') ILIKE :q)")
         params["q"] = f"%{q.strip()}%"
@@ -122,19 +178,20 @@ async def job_status(session: AsyncSession, *, company_id: str, document_id: UUI
 
 
 async def source_documents(
-    session: AsyncSession, *, company_id: str, linked_type: str, linked_id: UUID
+    session: AsyncSession, *, company_id: str, linked_type: str, linked_id: UUID, claims=None
 ) -> list[dict]:
     """The files a business record was made from (`document_links`)."""
+    access, access_params = document_access_filter(claims) if claims is not None else ("TRUE", {})
     rows = (
         await session.execute(
             text(
                 "SELECT d.id, d.original_filename, d.mime_type, d.file_size_bytes, d.document_type, "
                 "       d.uploaded_at, l.link_role, l.linked_at "
                 "FROM document_links l JOIN documents d ON d.id = l.document_id "
-                "WHERE l.company_id = :c AND l.linked_type = :t AND l.linked_id = :id "
+                f"WHERE l.company_id = :c AND l.linked_type = :t AND l.linked_id = :id AND {access} "
                 "ORDER BY l.linked_at"
             ),
-            {"c": company_id, "t": linked_type, "id": linked_id},
+            {"c": company_id, "t": linked_type, "id": linked_id, **access_params},
         )
     ).mappings().all()
     return [dict(r) for r in rows]

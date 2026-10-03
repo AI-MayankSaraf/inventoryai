@@ -25,7 +25,7 @@ relying on that alone.
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Optional
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
@@ -191,6 +191,23 @@ def require_any_permission(*codes: str) -> Callable:
     return _dependency
 
 
+def require_all_permissions(*codes: str) -> Callable:
+    """Every one of `codes` is needed. For an action that is two acts at once
+    — converting a comparison *creates purchase orders*, so it needs both
+    `comparison.convert` and `po.create` (security audit H4)."""
+
+    async def _dependency(claims: AccessTokenClaims = Depends(get_current_claims)) -> AccessTokenClaims:
+        missing = [code for code in codes if code not in claims.permissions]
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing permission: {', '.join(missing)}",
+            )
+        return claims
+
+    return _dependency
+
+
 async def get_tenant_session(
     claims: AccessTokenClaims = Depends(get_current_claims),
     session: AsyncSession = Depends(get_session),
@@ -240,7 +257,13 @@ def assert_godown_in_scope(claims: AccessTokenClaims, godown_id, *, override_per
     )
 
 
-def scoped_godown_filter(claims: AccessTokenClaims, column: str = "godown_id") -> tuple[str, dict]:
+def scoped_godown_filter(
+    claims: AccessTokenClaims,
+    column: str = "godown_id",
+    *,
+    override_permission: Optional[str] = "inventory.view_all",
+    include_null: bool = False,
+) -> tuple[str, dict]:
     """Read-side filter. Returns a SQL fragment and its parameters, to be
     ANDed into a query so a scoped user only sees rows for their own
     godowns.
@@ -254,14 +277,41 @@ def scoped_godown_filter(claims: AccessTokenClaims, column: str = "godown_id") -
     correct reading of 02_DATABASE_DESIGN.md's note that "absence of rows +
     `users.has_all_godowns=false` means no stock visibility".
     """
-    if claims.godown_scope.all_godowns or "inventory.view_all" in claims.permissions:
+    if claims.godown_scope.all_godowns or (override_permission and override_permission in claims.permissions):
         return "", {}
+    null_ok = f"{column} IS NULL OR " if include_null else ""
     if not claims.godown_scope.godown_ids:
-        return "FALSE", {}
+        return (f"{column} IS NULL" if include_null else "FALSE"), {}
     return (
-        f"{column} = ANY(CAST(:scoped_godown_ids AS uuid[]))",
+        f"({null_ok}{column} = ANY(CAST(:scoped_godown_ids AS uuid[])))",
         {"scoped_godown_ids": list(claims.godown_scope.godown_ids)},
     )
+
+
+def procurement_godown_filter(claims: AccessTokenClaims, column: str, *, include_null: bool = False) -> tuple[str, dict]:
+    """Read-side godown filter for procurement and operations records — GRNs,
+    purchase orders, alerts, the dashboard (security audit H3, BR-AUTH-12).
+
+    Unlike stock, `inventory.view_all` does NOT widen this: that permission
+    is "view stock in all godowns" (07_RBAC_MATRIX.md), not "see every
+    godown's receipts and purchase prices". Only an all-godowns scope does.
+    `include_null` keeps rows that are not tied to any godown yet (a draft PO
+    with no delivery godown), which no godown boundary can leak."""
+    return scoped_godown_filter(claims, column, override_permission=None, include_null=include_null)
+
+
+def godown_readable(claims: AccessTokenClaims, godown_id, *, include_null: bool = False) -> bool:
+    """Single-record twin of `procurement_godown_filter`."""
+    if claims.godown_scope.all_godowns:
+        return True
+    if godown_id is None:
+        return include_null
+    return str(godown_id) in {str(g) for g in claims.godown_scope.godown_ids}
+
+
+def godown_filter_sql(clause: str) -> str:
+    """`AND <clause>` or nothing, for splicing a filter into a WHERE."""
+    return f" AND {clause}" if clause else ""
 
 
 async def require_platform_admin(

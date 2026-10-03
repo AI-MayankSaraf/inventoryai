@@ -46,7 +46,19 @@ def _dotenv() -> dict[str, str]:
         if line and not line.startswith("#") and "=" in line:
             key, value = line.split("=", 1)
             values[key.strip()] = value.strip().strip('"').strip("'")
+    if values.get("SECRETS_MANAGER_SECRET_ID"):
+        # Passwords moved to Secrets Manager (security audit, Oct 2026):
+        # .env holds blanks for them, so fill them in from the secret.
+        values.update({k: str(v) for k, v in _secret_values().items() if str(v)})
     return values
+
+
+def _secret_values() -> dict:
+    sys.path.insert(0, str(BACKEND))
+    from app.core import secrets_manager
+    from app.core.config import Settings
+
+    return secrets_manager.fetch_raw(Settings(_env_file=str(BACKEND / ".env")))
 
 
 def _with_db(url: str, db: str) -> str:
